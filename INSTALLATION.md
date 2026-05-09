@@ -51,6 +51,12 @@ cd /tmp/rtl8188eus
 sudo make dkms_install
 ```
 
+#### 3.1.1 Install the driver via RealTek if DKMS failed
+
+```bash
+sudo apt install -y realtek-rtl8188eus-dkms
+```
+
 ### 3.2 Blacklist the conflicting in-kernel driver
 
 ```bash
