@@ -31,38 +31,51 @@ MOCK_NETWORKS = [
 
 ---
 
-## 🎯 Editing Mock Devices & DNS Data
+## 🎯 Editing Mock Devices & Telemetry Data
 
 **File:** `mock_data.py`
 
-Run this script to populate the database with fake devices:
+Run this script to populate `data/wispy.db` with fake **devices**, **DNS**, **TLS SNI**, **JA3**, **mDNS**, and **DHCP Option 55** (`dhcp_params` on each device), matching what the sniffer persists in real mode.
 
 ```bash
-# Generate fresh mock data
+# Generate / refresh mock data (upserts devices; adds DNS + telemetry rows)
 python mock_data.py
 
-# Add more queries to existing data
+# Extra DNS rows only (uses insert_dns; does not clear tables)
 python mock_data.py --more
 
-# Reset and regenerate
+# Clear ALL telemetry + devices, then regenerate a full mock dataset
 python mock_data.py --reset
+
+# More DNS rows per device when regenerating after --reset
+python mock_data.py --reset --many
 ```
 
-**Customize devices in `mock_data.py`:**
+**Customize devices in `mock_data.py`:** each entry in `MOCK_DEVICES` can include:
+
+- `mac`, `ip`, `hostname`, `vendor`, `os_guess`
+- `dhcp_params` — comma-separated Option 55–style parameter list string
+- `domains` — pool for synthetic `dns_requests`
+- `sni_hosts` — pool for synthetic `tls_sni` rows
+- `ja3_samples` — pool for synthetic `ja3_fingerprints` (32-hex style hashes)
+- `mdns_services` — pool for synthetic `mdns_broadcasts` (e.g. `_airplay._tcp.local`)
+
+Example shape:
+
 ```python
 MOCK_DEVICES = [
     {
         "mac": "a4:83:e7:12:34:56",
+        "ip": "192.168.50.10",
         "hostname": "Johns-iPhone",
         "vendor": "Apple",
         "os_guess": "iOS",
-        "domains": [
-            "instagram.com",
-            "twitter.com",
-            # Add more domains here
-        ]
+        "dhcp_params": "1,3,6,15,28,119,121",
+        "domains": ["api.instagram.com", "www.youtube.com"],
+        "sni_hosts": ["api.instagram.com", "www.youtube.com"],
+        "ja3_samples": ["e7d705a3286e1ea8e910c2f49a1a4d4f"],
+        "mdns_services": ["_sleep-proxy._udp.local"],
     },
-    # Add more devices here...
 ]
 ```
 
@@ -106,8 +119,8 @@ WISPY_MOCK_MODE=false sudo python web/app.py
 
 ### Mock Mode (macOS Development)
 ✅ WiFi scan returns fake networks from `mock/mock_networks.py`
-✅ Device data comes from `mock_data.py` script
-✅ No actual wireless adapter needed
+✅ Telemetry in the dashboard comes from SQLite — populate with `mock_data.py` (devices, DNS, TLS SNI, JA3, mDNS, DHCP Option 55)
+✅ No actual wireless adapter needed for UI/API work
 ✅ Safe for development
 
 ### Real Mode (Kali Production)
@@ -203,7 +216,7 @@ python web/app.py
 | What | Where | When |
 |------|-------|------|
 | **Mock WiFi Networks** | `mock/mock_networks.py` | Edit anytime, affects next scan |
-| **Mock Devices/DNS** | `mock_data.py` | Run script to regenerate DB data |
+| **Mock DB (devices + DNS + TLS/JA3/mDNS + DHCP 55)** | `mock_data.py` | Run script (`--reset` for full wipe + regenerate) |
 | **Mode Control** | `.env` or auto-detect | Set once, applies on startup |
 | **Check Mode** | Terminal output or `/api/status` | Anytime while running |
 

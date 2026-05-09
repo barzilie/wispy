@@ -100,9 +100,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Required Python packages include:
+Required Python packages (see `requirements.txt`) include:
 - `scapy` (packet parsing, including TLS ClientHello metadata)
+- `flask` (API server)
+- `google-generativeai` (Gemini client for `/api/recommend`)
 - `python-dotenv` (loading `.env` settings)
+
+If `import flask_cors` fails when starting `web/app.py`, install it in your venv (e.g. `pip install flask-cors`).
 
 ---
 
@@ -192,7 +196,9 @@ source .venv/bin/activate
 python web/app.py
 ```
 
-Open a browser and go to `http://localhost:5000`.
+Open a browser and go to `http://localhost:5000` for the **legacy** Flask template UI, or use the **React** dashboard (recommended): in another terminal run `cd web/frontend && npm start` and open `http://localhost:3001`. The React app proxies API calls to Flask on port 5000.
+
+The JSON API (`GET /api/data`) returns devices, DNS totals, and recent rows for **TLS SNI**, **JA3**, and **mDNS** (see `web/app.py`). On macOS or when using mock mode, run `python mock_data.py` (or `python mock_data.py --reset`) to populate sample rows for all telemetry types.
 
 ---
 
@@ -215,5 +221,6 @@ Operate WiSpy only on networks and devices you are authorized to monitor, and di
 | `sudo: hostapd: command not found` | `sudo apt install hostapd -y` |
 | `iw dev` shows no wireless interface | Reload driver: `sudo modprobe -r 8188eu && sudo modprobe 8188eu` |
 | Scanner finds 0 networks | Check driver with `lsmod \| grep rtl` — `rtl8xxxu` must not be listed |
-| Dashboard shows nothing | Make sure `main.py` is running in another terminal first |
+| Dashboard shows nothing | Make sure `main.py` (or `core/sniffer.py`) is running in another terminal first, or load mock data with `python mock_data.py` |
+| TLS / JA3 / mDNS panels empty | Normal until clients generate HTTPS (443) or mDNS (5353) traffic on the rogue segment; use `mock_data.py` to verify the UI |
 | DHCP leases not assigned | Check dnsmasq output in Terminal 1; ensure `wlan0` has IP `192.168.50.1` (`ip addr show wlan0`) |

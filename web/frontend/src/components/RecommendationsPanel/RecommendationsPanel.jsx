@@ -1,7 +1,7 @@
 import React from 'react';
 import './RecommendationsPanel.css';
 
-const RecommendationsPanel = ({ recommendations, loading, onGetRecommendations }) => {
+const RecommendationsPanel = ({ recommendations, loading, error, onGetRecommendations }) => {
   return (
     <section className="section">
       <h2>🎯 AI Attack Recommendations</h2>
@@ -12,6 +12,11 @@ const RecommendationsPanel = ({ recommendations, loading, onGetRecommendations }
       >
         {loading ? 'Analyzing...' : 'Get Recommendations'}
       </button>
+      {error && (
+        <div className="recommendations-error" role="alert">
+          {error}
+        </div>
+      )}
       {recommendations && (
         <div className="recommendations-box">
           <pre>{recommendations}</pre>

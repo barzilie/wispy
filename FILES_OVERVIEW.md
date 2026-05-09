@@ -8,14 +8,14 @@ Quick reference for where everything is and what it does.
 |------|---------|-----------------|
 | `.env` | Environment config | Override mock mode, set API keys |
 | `config.py` | Central configuration | Auto-detects platform, reads `.env` |
-| `MOCK_MODE_GUIDE.md` | Mock system docs | Learn how to use mock data |
+| `MOCK_MODE_GUIDE.md` | Mock system docs | Learn how to use mock data (networks, `mock_data.py`, modes) |
 
 ## 🧪 Mock Data (Development)
 
 | File | Purpose | Edit This To... |
 |------|---------|-----------------|
 | `mock/mock_networks.py` | WiFi networks for scanning | Add/edit fake networks |
-| `mock_data.py` | Device & DNS data generator | Add/edit fake devices |
+| `mock_data.py` | SQLite populator: devices, DNS, TLS SNI, JA3, mDNS, DHCP Option 55 | Edit `MOCK_DEVICES` or run with `--reset` / `--more` |
 | `mock/README.md` | Mock system documentation | - |
 
 **Usage:**
@@ -33,11 +33,12 @@ python mock_data.py
 |------|---------|
 | `web/app.py` | Flask API server (all endpoints) |
 | `core/scanner.py` | WiFi scanning (real mode) |
-| `core/sniffer.py` | DNS/DHCP packet capture |
+| `core/sniffer.py` | Packet capture: DNS, DHCP (incl. Option 55), mDNS, TLS ClientHello (SNI + JA3) |
 | `core/ap_manager.py` | Rogue AP setup (hostapd/dnsmasq) |
 | `core/fingerprint.py` | Device OS detection |
-| `analysis/storage.py` | SQLite database layer |
-| `analysis/recommender.py` | AI recommendations (not implemented) |
+| `analysis/storage.py` | SQLite layer (devices, DNS, `tls_sni`, `ja3_fingerprints`, `mdns_broadcasts`) |
+| `analysis/dns_filters.py` | Regex helpers to skip ad-tech DNS before storage |
+| `analysis/recommender.py` | Gemini-based session summary → recommendations |
 
 ## ⚛️ Frontend (React)
 
@@ -63,8 +64,10 @@ ComponentName/
 - `Header` - App header
 - `DeviceList` - Grid of device cards
 - `DeviceCard` - Single device display
-- `DnsTable` - DNS queries table
-- `RecommendationsPanel` - AI attack recommendations
+- `DnsTable` - DNS queries (infinite scroll via `/api/dns`)
+- `DnsAnalytics` - DNS charts (Recharts)
+- `TelemetryTables` - TLS SNI, JA3, and mDNS tables
+- `RecommendationsPanel` - AI recommendations
 
 ## 📚 Documentation
 
@@ -83,7 +86,7 @@ ComponentName/
 
 | File/Directory | Purpose |
 |----------------|---------|
-| `data/wispy.db` | SQLite database (devices, DNS queries) |
+| `data/wispy.db` | SQLite DB: devices (incl. `dhcp_params`), DNS, TLS SNI, JA3, mDNS |
 | `data/` | Runtime data (gitignored) |
 
 ## 🧪 Testing
@@ -91,6 +94,7 @@ ComponentName/
 | File | Purpose |
 |------|---------|
 | `tests/test_storage.py` | SQLite storage tests |
+| `tests/test_dns_filters.py` | Ad-domain DNS filter tests |
 
 ## 🚀 Entry Points
 

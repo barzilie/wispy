@@ -1,3 +1,12 @@
+.recommendations-error {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #ff6666;
+  color: #ff9999;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+}
+
 .recommend-button {
   background: #000000;
   color: #00ff00;

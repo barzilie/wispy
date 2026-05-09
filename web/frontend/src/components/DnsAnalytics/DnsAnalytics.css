@@ -1,0 +1,48 @@
+.dns-analytics h2 {
+  color: #00ff00;
+  font-family: 'Courier New', monospace;
+  text-shadow: 0 0 6px rgba(0, 255, 0, 0.5);
+}
+
+.dns-analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 960px) {
+  .dns-analytics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dns-chart-panel {
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid #00ff00;
+  padding: 1rem;
+  box-shadow: 0 0 8px rgba(0, 255, 0, 0.2);
+}
+
+.dns-chart-panel h3 {
+  margin: 0 0 0.75rem 0;
+  color: #00cc00;
+  font-family: 'Courier New', monospace;
+  font-size: 0.95rem;
+  font-weight: normal;
+  letter-spacing: 1px;
+}
+
+.dns-chart-wrap {
+  width: 100%;
+  min-height: 260px;
+}
+
+.dns-bar-wrap {
+  min-height: 320px;
+}
+
+.dns-analytics-empty {
+  color: #00cc00;
+  font-family: 'Courier New', monospace;
+  opacity: 0.85;
+}

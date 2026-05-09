@@ -6,7 +6,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
-from analysis.storage import get_devices, get_dns_requests
+from analysis.storage import (
+    get_devices,
+    get_dns_requests,
+    count_dns_requests,
+    get_tls_sni,
+    count_tls_sni,
+    get_ja3,
+    count_ja3,
+    get_mdns,
+    count_mdns,
+)
 
 # Import configuration
 from config import MOCK_MODE, FLASK_HOST, FLASK_PORT, WIFI_INTERFACE, print_startup_info, get_mode_info
@@ -35,11 +45,87 @@ def index():
     return render_template('index.html')
 
 
+def _int_arg(name, default, min_v=0, max_v=None):
+    try:
+        v = int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        v = default
+    if v < min_v:
+        v = min_v
+    if max_v is not None and v > max_v:
+        v = max_v
+    return v
+
+
 @app.route('/api/data')
 def api_data():
-    return jsonify({
+    """Devices plus optional DNS slice and recent TLS SNI / JA3 / mDNS telemetry."""
+    include_dns = request.args.get('include_dns', '1').lower() not in ('0', 'false', 'no')
+    dns_limit = _int_arg('dns_limit', 200, min_v=1, max_v=2000)
+    dns_offset = _int_arg('dns_offset', 0, min_v=0, max_v=10_000_000)
+    tel_limit = _int_arg('telemetry_limit', 200, min_v=1, max_v=2000)
+    include_telemetry = request.args.get('include_telemetry', '1').lower() not in ('0', 'false', 'no')
+
+    payload = {
         'devices': get_devices(),
-        'dns':     get_dns_requests(limit=150),
+        'dns_total': count_dns_requests(),
+    }
+    if include_dns:
+        payload['dns'] = get_dns_requests(limit=dns_limit, offset=dns_offset)
+    else:
+        payload['dns'] = []
+
+    if include_telemetry:
+        payload['tls_sni'] = get_tls_sni(limit=tel_limit, offset=0)
+        payload['tls_sni_total'] = count_tls_sni()
+        payload['ja3'] = get_ja3(limit=tel_limit, offset=0)
+        payload['ja3_total'] = count_ja3()
+        payload['mdns'] = get_mdns(limit=tel_limit, offset=0)
+        payload['mdns_total'] = count_mdns()
+    else:
+        payload['tls_sni'] = []
+        payload['tls_sni_total'] = 0
+        payload['ja3'] = []
+        payload['ja3_total'] = 0
+        payload['mdns'] = []
+        payload['mdns_total'] = 0
+
+    return jsonify(payload)
+
+
+@app.route('/api/dns')
+def api_dns():
+    """Paginated / cursor DNS feed for infinite scroll and incremental refresh."""
+    limit = _int_arg('limit', 200, min_v=1, max_v=5000)
+    offset = _int_arg('offset', 0, min_v=0, max_v=10_000_000)
+    device_mac = request.args.get('mac') or request.args.get('device_mac')
+    after_id = request.args.get('after_id')
+    before_id = request.args.get('before_id')
+
+    after = before = None
+    if after_id is not None and str(after_id).strip() != '':
+        try:
+            after = int(after_id)
+        except ValueError:
+            after = None
+    if before_id is not None and str(before_id).strip() != '':
+        try:
+            before = int(before_id)
+        except ValueError:
+            before = None
+
+    rows = get_dns_requests(
+        limit=limit,
+        offset=offset if after is None and before is None else 0,
+        device_mac=device_mac,
+        after_id=after,
+        before_id=before,
+    )
+    total = count_dns_requests(device_mac=device_mac)
+    return jsonify({
+        'dns': rows,
+        'total': total,
+        'count': len(rows),
     })
 
 

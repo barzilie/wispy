@@ -14,6 +14,7 @@ from analysis.storage import (
     insert_tls_sni,
     insert_ja3,
 )
+from analysis.dns_filters import is_ad_tracking_domain
 from core.fingerprint import fingerprint
 try:
     from scapy.layers.tls.all import TLS, TLSClientHello  # type: ignore
@@ -62,6 +63,8 @@ def _handle_dns(packet):
     domain = packet[DNSQR].qname.decode(errors='ignore').rstrip('.')
 
     if not domain or domain.endswith('.local'):
+        return
+    if is_ad_tracking_domain(domain):
         return
 
     fp = fingerprint(mac, ttl)

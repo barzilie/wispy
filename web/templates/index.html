@@ -96,6 +96,21 @@
     .dns-device { color: #00aaaa; min-width: 110px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dns-domain { color: #00ff41; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    .log-section-title {
+      font-size: 0.68em;
+      letter-spacing: 3px;
+      color: #558855;
+      padding: 6px 0 4px;
+      border-top: 1px solid #1a2a1a;
+      margin-top: 6px;
+    }
+    .log-section-title:first-child { border-top: none; margin-top: 0; }
+    .log-block {
+      max-height: 140px;
+      overflow-y: auto;
+      margin-bottom: 4px;
+    }
+
     /* ── Recommend section ── */
     .recommend-section {
       border-top: 1px solid #1a2a1a;
@@ -151,9 +166,24 @@
   </div>
 
   <div class="panel right-panel">
-    <div class="panel-title">DNS LOG</div>
-    <div class="panel-body" id="dns-log">
-      <div class="empty">No queries captured yet.</div>
+    <div class="panel-title">TRAFFIC LOG</div>
+    <div class="panel-body">
+      <div class="log-section-title">DNS</div>
+      <div class="log-block" id="dns-log">
+        <div class="empty">No queries captured yet.</div>
+      </div>
+      <div class="log-section-title">TLS SNI</div>
+      <div class="log-block" id="tls-log">
+        <div class="empty">None yet.</div>
+      </div>
+      <div class="log-section-title">JA3</div>
+      <div class="log-block" id="ja3-log">
+        <div class="empty">None yet.</div>
+      </div>
+      <div class="log-section-title">mDNS</div>
+      <div class="log-block" id="mdns-log">
+        <div class="empty">None yet.</div>
+      </div>
     </div>
   </div>
 </div>

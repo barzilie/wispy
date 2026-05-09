@@ -46,7 +46,7 @@ The system runs as two independent processes:
 Both processes access the same SQLite file concurrently. SQLite's built-in file locking handles concurrent reads and writes safely without any additional synchronization.
 
 ### 2.3. Schema Design
-Two tables were designed to capture all relevant monitoring data:
+The database evolved from a minimal **devices + DNS** design to additional telemetry tables (TLS SNI, JA3, mDNS) and a **`dhcp_params`** column on devices. The authoritative DDL and migrations live in `analysis/storage.py` (`init_db()`).
 
 **`devices` table** — one row per connected device:
 
@@ -57,17 +57,19 @@ Two tables were designed to capture all relevant monitoring data:
 | `hostname` | TEXT | Device name broadcast via DHCP (e.g. "John's iPhone") |
 | `vendor` | TEXT | Manufacturer derived from MAC OUI lookup |
 | `os_guess` | TEXT | Operating system inferred from TTL and DHCP fingerprint |
+| `dhcp_params` | TEXT | DHCP Option 55 (parameter request list), comma-separated, when observed |
 | `first_seen` | TEXT | UTC timestamp of first connection |
 | `last_seen` | TEXT | UTC timestamp of most recent activity |
 
-**`dns_requests` table** — one row per DNS query:
+**`dns_requests`** — one row per stored DNS query (`id`, `device_mac`, `domain`, `timestamp`).
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | INTEGER (PK) | Auto-incrementing row ID |
-| `device_mac` | TEXT | Foreign key linking query to a device |
-| `domain` | TEXT | Domain name queried (e.g. "api.instagram.com") |
-| `timestamp` | TEXT | UTC timestamp of the query |
+**`tls_sni`** — TLS ClientHello server name (`id`, `device_mac`, `sni`, `timestamp`).
+
+**`ja3_fingerprints`** — JA3-style MD5 hash from ClientHello (`id`, `device_mac`, `ja3_hash`, `timestamp`).
+
+**`mdns_broadcasts`** — mDNS service-style names (`id`, `device_mac`, `service_name`, `timestamp`).
+
+See §“Telemetry Expansion” below for capture rules and indexing.
 
 ### 2.4. Key Implementation Decisions
 * **MAC as primary key:** Every network packet contains the source MAC address, making it the most reliable and consistent device identifier available at the data link layer.
@@ -175,7 +177,9 @@ The original `main.py` command-line flow was replaced with a three-screen web in
 - `Header` - App header (original, kept for consistency)
 - `DeviceList` - Grid container for devices
 - `DeviceCard` - Individual device display
-- `DnsTable` - DNS queries table
+- `DnsTable` - DNS queries table (full loaded set, infinite scroll)
+- `DnsAnalytics` - DNS volume-over-time and top-domains charts (Recharts)
+- `TelemetryTables` - TLS SNI, JA3, and mDNS tables (recent rows from API)
 - `RecommendationsPanel` - AI recommendations UI
 
 ### 4.4. Custom React Hooks
@@ -190,9 +194,11 @@ The original `main.py` command-line flow was replaced with a three-screen web in
 - Manages loading and error states
 
 **`useWispyData.js`:**
-- Fetches device and DNS data from `/api/data`
-- Auto-refreshes every 2 seconds
-- Manages error states for data fetching
+- Loads devices from `/api/data?include_dns=0` and the first page of DNS from `GET /api/dns`
+- On each poll, refreshes **TLS SNI**, **JA3**, and **mDNS** slices from `/api/data` (`tls_sni`, `ja3`, `mdns` arrays)
+- Polls every 2 seconds for device updates and incremental DNS rows (`after_id` cursor)
+- Supports loading older DNS via `before_id` for infinite scroll (used by `DnsTable`)
+- Exposes `dnsTotal`, `loadMoreDns`, `loadingMoreDns`, `hasMoreDns`, plus `tlsSni`, `ja3Rows`, `mdnsRows`
 - Used only on monitoring screen
 
 **`useRecommendations.js`:**
@@ -224,9 +230,10 @@ The original `main.py` command-line flow was replaced with a three-screen web in
 - Returns mode information (mock vs real)
 - Used for debugging and monitoring
 
-**Existing endpoints maintained:**
-- `GET /api/data` - Device and DNS queries (unchanged)
-- `POST /api/recommend` - AI recommendations (unchanged)
+**Existing / extended endpoints:**
+- `GET /api/data` — devices; optional DNS slice (`include_dns`, `dns_limit`, `dns_offset`, `dns_total`); recent **TLS SNI / JA3 / mDNS** lists with totals (`telemetry_limit`, `include_telemetry`, `*_total` fields)
+- `GET /api/dns` — paginated DNS feed: `limit`, `offset`, `mac` / `device_mac`, `after_id` (newer than id), `before_id` (older than id); returns `dns`, `total`, `count`
+- `POST /api/recommend` — calls `analysis.recommender.get_recommendations()` (Gemini)
 
 ### 4.6. Mock Data System Implementation
 
@@ -250,11 +257,9 @@ The original `main.py` command-line flow was replaced with a three-screen web in
 - Easy to add/modify networks for testing different scenarios
 
 **`mock_data.py`:**
-- Script to populate SQLite with fake device data
-- Generates realistic devices with hostnames, vendors, OS
-- Creates fake DNS query history
-- `--more` flag to add additional queries
-- `--reset` flag to clear and regenerate
+- Populates SQLite with fake **devices** (including `dhcp_params`), **DNS**, **TLS SNI**, **JA3**, and **mDNS** rows aligned with the live sniffer schema
+- `--more` appends additional DNS rows via `insert_dns`
+- `--reset` wipes devices and all telemetry tables, then a normal run regenerates the full mock dataset (`--many` increases DNS count per device)
 
 **Mode Detection Flow:**
 ```python
@@ -370,9 +375,9 @@ BROWSER=none
 - ✅ Auto-detection of platform
 - ✅ Component-based architecture
 - ✅ Custom React hooks for state management
+- ✅ AI recommendations via `analysis/recommender.py` (Gemini) and extended DNS/API/dashboard features (see §7)
 
 **Not Yet Implemented:**
-- ⚠️ AI recommendations (endpoint exists but `analysis/recommender.py` not implemented)
 - ⚠️ Actual rogue AP deployment on network selection (mock mode only)
 - ⚠️ Integration between network selection and `main.py` flow
 - ⚠️ Real-time status indicators on monitoring screen
@@ -410,12 +415,7 @@ BROWSER=none
 
 ### 5.2. AI Recommender Implementation
 
-**`analysis/recommender.py` needs to be built:**
-- Get session summary from `get_session_summary()` in `storage.py`
-- Format data for AI prompt
-- Call Google Gemini API
-- Parse and return recommendations
-- Handle API errors gracefully
+**Status:** Implemented in `analysis/recommender.py` (see §7). Remaining work is operational (valid `GOOGLE_API_KEY`, model availability) and prompt tuning if needed.
 
 ### 5.3. Error Handling and User Feedback
 
@@ -603,3 +603,61 @@ Post-change validation performed:
 
 Known environment limitation encountered during runtime smoke test:
 - `python-dotenv` was missing in the execution environment (`ModuleNotFoundError: dotenv`) when attempting a direct `init_db()` runtime invocation; this is an environment dependency issue, not a syntax/integration issue in the code changes.
+
+---
+
+## 7. Dashboard analytics, DNS feed scaling, ad-domain filtering, and AI recommender
+
+This phase completed the Gemini-based recommender, reduced noise from ad-tech DNS, scaled the DNS API for large logs, and enriched the React monitoring screen with per-device DNS context and charts.
+
+### 7.1. AI recommender (`analysis/recommender.py`)
+
+- New module invoked by `POST /api/recommend` in `web/app.py`.
+- Loads `GOOGLE_API_KEY` via `config.py` (same `.env` pattern as the rest of the project).
+- Builds a structured prompt from `get_session_summary()` output (JSON), framed for an authorized academic lab and defensive/educational tone.
+- Uses `google.generativeai` with model fallbacks: `gemini-2.0-flash`, then `gemini-1.5-flash`, then `gemini-1.5-flash-latest`.
+- Returns clear messages when the API key is missing, when there is no telemetry yet, or when all models fail.
+
+### 7.2. Ad / ad-tech DNS filtering
+
+- New helper module `analysis/dns_filters.py` with `is_ad_tracking_domain(domain)` backed by a compiled case-insensitive regex over common advertising and syndication host patterns (e.g. DoubleClick, Google syndication, major SSPs).
+- `core/sniffer.py` calls this check in `_handle_dns` before `insert_dns`, so noisy ad lookups are not stored in `dns_requests`.
+- Patterns can be extended by editing the regex fragment list in `dns_filters.py`.
+- Added `tests/test_dns_filters.py` for basic allow/block checks.
+
+### 7.3. Storage and API changes for DNS and multi-protocol telemetry (`analysis/storage.py`, `web/app.py`)
+
+- Shared helpers `_fetch_telemetry` / `_count_telemetry` (whitelist: `dns_requests`, `tls_sni`, `ja3_fingerprints`, `mdns_broadcasts`) drive consistent newest-first cursor pagination.
+- `get_dns_requests` / `count_dns_requests` plus **`get_tls_sni`**, **`get_ja3`**, **`get_mdns`** and matching **`count_*`** (same `limit` / `offset` / `device_mac` / `after_id` / `before_id` semantics as DNS).
+- Index `idx_dns_device_mac` on `dns_requests(device_mac)` for per-device queries.
+- `get_session_summary()` pulls large DNS, TLS, JA3, and mDNS slices and emits per-device fields: `domains_queried`, `tls_sni`, `ja3_fingerprints`, `mdns_services`, and `dhcp_params`, for richer Gemini prompts.
+
+**Flask:**
+
+- `GET /api/data` — optional `include_dns`, `dns_limit`, `dns_offset`, `dns_total`; optional **`include_telemetry`**, **`telemetry_limit`**, with **`tls_sni`**, **`tls_sni_total`**, **`ja3`**, **`ja3_total`**, **`mdns`**, **`mdns_total`**.
+- `GET /api/dns` — dedicated DNS listing with pagination/cursor parameters and JSON metadata (`total`, `count`).
+
+### 7.4. React monitoring UI updates (`web/frontend`)
+
+- **`useWispyData.js`:** Initial parallel fetch of `GET /api/dns` (first page) and `GET /api/data?include_dns=0`; polling updates devices, TLS/JA3/mDNS arrays from `/api/data`, and merges new DNS via `after_id`; supports “cold start” when the DB gains rows after an empty first load; tracks end-of-history for older DNS pages.
+- **`TelemetryTables`:** Three scrollable tables for recent TLS SNI, JA3, and mDNS rows (styled consistently with `DnsTable`).
+- **`DnsTable`:** Renders all loaded DNS rows; uses an `IntersectionObserver` sentinel to call `loadMoreDns`; header shows `loaded of total` when more DB rows exist.
+- **`DnsAnalytics`:** Queries per minute (line chart) and top domains (bar chart) via **`recharts`**.
+- **`DeviceCard` / `DeviceList`:** **DHCP Option 55** when `dhcp_params` is set; per-device previews for **DNS**, **SNI**, **JA3**, and **mDNS** from the loaded API slices.
+- **`RecommendationsPanel`:** Displays hook-level errors via an `error` prop and CSS class `recommendations-error`.
+
+### 7.5. Verification
+
+- Frontend production build (`npm run build`) succeeded with Recharts bundled.
+- `tests/test_dns_filters.py` runs without importing the full storage stack (avoids `dotenv` in minimal environments).
+
+### 7.6. Operator notes
+
+- Set **`GOOGLE_API_KEY`** in `.env` for live Gemini recommendations.
+- **Legacy Flask template** (`web/templates/index.html` + `web/static/js/app.js`) calls `GET /api/data` and renders **DNS**, **TLS SNI**, **JA3**, and **mDNS** sections plus DHCP Option 55 on device cards when present.
+- **`mock_data.py`** seeds all of the above for offline UI testing; see `MOCK_MODE_GUIDE.md`.
+
+### 7.7. Cross-reference
+
+- End-to-end capture behavior and BPF filter: **§“Telemetry Expansion”** (duplicate §4 heading in this document) and `INSTALLATION.md` Step 8.
+- File map: `FILES_OVERVIEW.md`.

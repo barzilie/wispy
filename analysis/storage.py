@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from collections import defaultdict
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -7,6 +8,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 DB_PATH = os.path.join(PROJECT_ROOT, "data", "wispy.db")
+
+_TELEMETRY_TABLES = frozenset({
+    "dns_requests",
+    "tls_sni",
+    "ja3_fingerprints",
+    "mdns_broadcasts",
+})
 
 
 def _connect():
@@ -81,6 +89,9 @@ def init_db():
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tls_sni_value ON tls_sni(sni)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dns_device_mac ON dns_requests(device_mac)"
         )
         conn.commit()
 
@@ -169,14 +180,154 @@ def get_devices():
     return [dict(r) for r in rows]
 
 
-def get_dns_requests(limit=100):
-    """Returns the most recent DNS queries up to the given limit, ordered newest first."""
+def _count_telemetry(table, device_mac=None):
+    if table not in _TELEMETRY_TABLES:
+        raise ValueError("invalid telemetry table")
+    with _connect() as conn:
+        if device_mac:
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE device_mac = ?",
+                (device_mac,),
+            ).fetchone()
+        else:
+            row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+    return int(row[0])
+
+
+def _fetch_telemetry(
+    table,
+    limit=100,
+    offset=0,
+    device_mac=None,
+    after_id=None,
+    before_id=None,
+):
+    """Generic newest-first id cursor pagination for telemetry tables."""
+    if table not in _TELEMETRY_TABLES:
+        raise ValueError("invalid telemetry table")
     with _connect() as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT * FROM dns_requests ORDER BY timestamp DESC LIMIT ?", (limit,)
-        ).fetchall()
+        base = f"SELECT * FROM {table}"
+        conds = []
+        params = []
+
+        if device_mac:
+            conds.append("device_mac = ?")
+            params.append(device_mac)
+        if after_id is not None:
+            conds.append("id > ?")
+            params.append(after_id)
+        if before_id is not None:
+            conds.append("id < ?")
+            params.append(before_id)
+
+        if conds:
+            base += " WHERE " + " AND ".join(conds)
+
+        if after_id is not None:
+            base += " ORDER BY id DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(base, tuple(params)).fetchall()
+        elif before_id is not None:
+            base += " ORDER BY id DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(base, tuple(params)).fetchall()
+        else:
+            base += " ORDER BY id DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            rows = conn.execute(base, tuple(params)).fetchall()
+
     return [dict(r) for r in rows]
+
+
+def count_dns_requests(device_mac=None):
+    """Total rows in dns_requests, optionally for one device."""
+    return _count_telemetry("dns_requests", device_mac)
+
+
+def count_tls_sni(device_mac=None):
+    return _count_telemetry("tls_sni", device_mac)
+
+
+def count_ja3(device_mac=None):
+    return _count_telemetry("ja3_fingerprints", device_mac)
+
+
+def count_mdns(device_mac=None):
+    return _count_telemetry("mdns_broadcasts", device_mac)
+
+
+def get_dns_requests(
+    limit=100,
+    offset=0,
+    device_mac=None,
+    after_id=None,
+    before_id=None,
+):
+    """Returns DNS rows. Default: newest first with offset pagination.
+
+    If after_id is set, returns rows with id > after_id (newest first), up to limit.
+    If before_id is set (and after_id is not), returns rows with id < before_id (older), newest first.
+    """
+    return _fetch_telemetry(
+        "dns_requests",
+        limit,
+        offset,
+        device_mac,
+        after_id,
+        before_id,
+    )
+
+
+def get_tls_sni(
+    limit=100,
+    offset=0,
+    device_mac=None,
+    after_id=None,
+    before_id=None,
+):
+    return _fetch_telemetry(
+        "tls_sni",
+        limit,
+        offset,
+        device_mac,
+        after_id,
+        before_id,
+    )
+
+
+def get_ja3(
+    limit=100,
+    offset=0,
+    device_mac=None,
+    after_id=None,
+    before_id=None,
+):
+    return _fetch_telemetry(
+        "ja3_fingerprints",
+        limit,
+        offset,
+        device_mac,
+        after_id,
+        before_id,
+    )
+
+
+def get_mdns(
+    limit=100,
+    offset=0,
+    device_mac=None,
+    after_id=None,
+    before_id=None,
+):
+    return _fetch_telemetry(
+        "mdns_broadcasts",
+        limit,
+        offset,
+        device_mac,
+        after_id,
+        before_id,
+    )
 
 
 def reset_db():
@@ -201,19 +352,42 @@ def reset_db():
 def get_session_summary():
     """Returns a compact summary for the AI recommender."""
     devices = get_devices()
-    dns = get_dns_requests(limit=500)
+    dns = get_dns_requests(limit=8000, offset=0)
+    tls = get_tls_sni(limit=4000, offset=0)
+    ja3 = get_ja3(limit=4000, offset=0)
+    mdns = get_mdns(limit=4000, offset=0)
+
+    domains_by_mac = defaultdict(set)
+    for r in dns:
+        if r.get("domain"):
+            domains_by_mac[r["device_mac"]].add(r["domain"])
+    sni_by_mac = defaultdict(set)
+    for r in tls:
+        if r.get("sni"):
+            sni_by_mac[r["device_mac"]].add(r["sni"])
+    ja3_by_mac = defaultdict(set)
+    for r in ja3:
+        if r.get("ja3_hash"):
+            ja3_by_mac[r["device_mac"]].add(r["ja3_hash"])
+    mdns_by_mac = defaultdict(set)
+    for r in mdns:
+        if r.get("service_name"):
+            mdns_by_mac[r["device_mac"]].add(r["service_name"])
 
     summary = []
     for device in devices:
         mac = device["mac"]
-        domains = [r["domain"] for r in dns if r["device_mac"] == mac]
         summary.append({
             "mac": mac,
             "ip": device["ip"],
             "hostname": device["hostname"],
             "vendor": device["vendor"],
             "os_guess": device["os_guess"],
-            "domains_queried": list(set(domains)),
+            "dhcp_params": device.get("dhcp_params"),
+            "domains_queried": list(domains_by_mac[mac]),
+            "tls_sni": list(sni_by_mac[mac]),
+            "ja3_fingerprints": list(ja3_by_mac[mac]),
+            "mdns_services": list(mdns_by_mac[mac]),
         })
     return summary
 

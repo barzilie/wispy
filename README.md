@@ -54,7 +54,12 @@ The project is divided into five major phases:
 
 ## Phase C – Monitoring and Information Collection
 
-* Monitor DNS requests in real time
+* Monitor DNS requests in real time (with optional filtering of common ad-tech hostnames before storage)
+* Capture additional **metadata** from the rogue-AP segment where available:
+
+  * DHCP Option 55 (parameter request list) on the device record
+  * mDNS service-style names (`.local`, service discovery)
+  * TLS ClientHello **SNI** and **JA3**-style fingerprint hashes on HTTPS (`tcp/443`) — no payload decryption
 * Identify connected devices using:
 
   * MAC addresses
@@ -116,6 +121,7 @@ Use networking tools to:
 Develop Python scripts using Scapy for:
 
 * DNS request monitoring
+* DHCP, mDNS, and TLS ClientHello metadata (SNI / JA3 hash) as defined in project scope
 * Traffic analysis
 * Packet inspection and interpretation
 
@@ -123,14 +129,15 @@ Develop Python scripts using Scapy for:
 
 Build a visual dashboard using:
 
-* Flask
-* JavaScript
+* Flask (REST API and optional legacy template UI)
+* React SPA (`web/frontend`) for the primary operator workflow
+* JavaScript (legacy `web/templates` dashboard)
 
 The dashboard will:
 
-* Display collected information visually
+* Display collected information visually (devices, DNS, TLS SNI, JA3, mDNS)
 * Provide real-time monitoring
-* Present analytical insights
+* Present analytical insights (including DNS charts where implemented)
 
 ## 4. Recommendation Engine
 

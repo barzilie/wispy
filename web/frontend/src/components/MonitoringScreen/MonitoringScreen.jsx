@@ -2,13 +2,26 @@ import React from 'react';
 import './MonitoringScreen.css';
 import DeviceList from '../DeviceList/DeviceList';
 import DnsTable from '../DnsTable/DnsTable';
+import DnsAnalytics from '../DnsAnalytics/DnsAnalytics';
+import TelemetryTables from '../TelemetryTables/TelemetryTables';
 import RecommendationsPanel from '../RecommendationsPanel/RecommendationsPanel';
 import useWispyData from '../../hooks/useWispyData';
 import useRecommendations from '../../hooks/useRecommendations';
 
 const MonitoringScreen = ({ selectedNetwork }) => {
-  const { devices, dnsQueries, error } = useWispyData(2000);
-  const { recommendations, loading, getRecommendations } = useRecommendations();
+  const {
+    devices,
+    dnsQueries,
+    dnsTotal,
+    tlsSni,
+    ja3Rows,
+    mdnsRows,
+    error,
+    loadMoreDns,
+    loadingMoreDns,
+    hasMoreDns,
+  } = useWispyData(2000);
+  const { recommendations, loading, error: recError, getRecommendations } = useRecommendations();
 
   return (
     <div className="monitoring-screen">
@@ -30,11 +43,26 @@ const MonitoringScreen = ({ selectedNetwork }) => {
           </div>
         )}
 
-        <DeviceList devices={devices} />
-        <DnsTable dnsQueries={dnsQueries} />
+        <DeviceList
+          devices={devices}
+          dnsQueries={dnsQueries}
+          tlsSni={tlsSni}
+          ja3Rows={ja3Rows}
+          mdnsRows={mdnsRows}
+        />
+        <TelemetryTables tlsSni={tlsSni} ja3={ja3Rows} mdns={mdnsRows} />
+        <DnsAnalytics dnsQueries={dnsQueries} />
+        <DnsTable
+          dnsQueries={dnsQueries}
+          dnsTotal={dnsTotal}
+          onLoadMore={loadMoreDns}
+          hasMoreDns={hasMoreDns}
+          loadingMoreDns={loadingMoreDns}
+        />
         <RecommendationsPanel
           recommendations={recommendations}
           loading={loading}
+          error={recError}
           onGetRecommendations={getRecommendations}
         />
       </div>

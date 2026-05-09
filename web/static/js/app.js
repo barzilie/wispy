@@ -4,6 +4,9 @@ async function fetchData() {
     const data = await resp.json();
     renderDevices(data.devices);
     renderDns(data.dns, data.devices);
+    renderTlsSni(data.tls_sni || [], data.devices);
+    renderJa3(data.ja3 || [], data.devices);
+    renderMdns(data.mdns || [], data.devices);
     const n = data.devices.length;
     document.getElementById('device-count').textContent =
       `${n} DEVICE${n !== 1 ? 'S' : ''}`;
@@ -22,6 +25,9 @@ function renderDevices(devices) {
     const name = d.hostname || d.mac;
     const meta  = [d.vendor, d.os_guess].filter(Boolean).join(' / ') || '—';
     const age   = d.last_seen ? d.last_seen.substring(11, 19) + ' UTC' : '';
+    const dhcp = d.dhcp_params
+      ? `<div class="device-age" title="DHCP Option 55">opt55: ${esc(d.dhcp_params)}</div>`
+      : '';
     return `
       <div class="device-card">
         <div class="device-name">${esc(name)}</div>
@@ -30,6 +36,7 @@ function renderDevices(devices) {
           <span class="device-ip">${esc(d.ip || '—')}</span>
           &nbsp;·&nbsp;${esc(meta)}
         </div>
+        ${dhcp}
         <div class="device-age">last seen ${esc(age)}</div>
       </div>`;
   }).join('');
@@ -52,6 +59,66 @@ function renderDns(entries, devices) {
         <span class="dns-time">${esc(time)}</span>
         <span class="dns-device" title="${esc(r.device_mac)}">${esc(device)}</span>
         <span class="dns-domain" title="${esc(r.domain)}">${esc(r.domain)}</span>
+      </div>`;
+  }).join('');
+}
+
+function renderTlsSni(entries, devices) {
+  const el = document.getElementById('tls-log');
+  if (!entries.length) {
+    el.innerHTML = '<div class="empty">No TLS SNI captured yet.</div>';
+    return;
+  }
+  const nameMap = {};
+  devices.forEach(d => { nameMap[d.mac] = d.hostname || shortMac(d.mac); });
+  el.innerHTML = entries.map(r => {
+    const time = r.timestamp ? r.timestamp.substring(11, 19) : '';
+    const device = nameMap[r.device_mac] || shortMac(r.device_mac);
+    return `
+      <div class="dns-entry">
+        <span class="dns-time">${esc(time)}</span>
+        <span class="dns-device" title="${esc(r.device_mac)}">${esc(device)}</span>
+        <span class="dns-domain" title="${esc(r.sni)}">${esc(r.sni)}</span>
+      </div>`;
+  }).join('');
+}
+
+function renderJa3(entries, devices) {
+  const el = document.getElementById('ja3-log');
+  if (!entries.length) {
+    el.innerHTML = '<div class="empty">No JA3 captured yet.</div>';
+    return;
+  }
+  const nameMap = {};
+  devices.forEach(d => { nameMap[d.mac] = d.hostname || shortMac(d.mac); });
+  el.innerHTML = entries.map(r => {
+    const time = r.timestamp ? r.timestamp.substring(11, 19) : '';
+    const device = nameMap[r.device_mac] || shortMac(r.device_mac);
+    return `
+      <div class="dns-entry">
+        <span class="dns-time">${esc(time)}</span>
+        <span class="dns-device" title="${esc(r.device_mac)}">${esc(device)}</span>
+        <span class="dns-domain" title="${esc(r.ja3_hash)}">${esc(r.ja3_hash)}</span>
+      </div>`;
+  }).join('');
+}
+
+function renderMdns(entries, devices) {
+  const el = document.getElementById('mdns-log');
+  if (!entries.length) {
+    el.innerHTML = '<div class="empty">No mDNS captured yet.</div>';
+    return;
+  }
+  const nameMap = {};
+  devices.forEach(d => { nameMap[d.mac] = d.hostname || shortMac(d.mac); });
+  el.innerHTML = entries.map(r => {
+    const time = r.timestamp ? r.timestamp.substring(11, 19) : '';
+    const device = nameMap[r.device_mac] || shortMac(r.device_mac);
+    return `
+      <div class="dns-entry">
+        <span class="dns-time">${esc(time)}</span>
+        <span class="dns-device" title="${esc(r.device_mac)}">${esc(device)}</span>
+        <span class="dns-domain" title="${esc(r.service_name)}">${esc(r.service_name)}</span>
       </div>`;
   }).join('');
 }
