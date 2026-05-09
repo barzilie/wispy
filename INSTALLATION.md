@@ -143,6 +143,28 @@ You should see a list of nearby Wi-Fi networks.
 
 WiSpy runs as **two separate processes**. Open two terminals.
 
+### 8.1 Optional: allow web app to run `main.py` without sudo password
+
+If the dashboard needs to start/stop `main.py` itself, add a restricted `sudoers` rule with `visudo`.
+
+> Replace `www-data` with the Linux user that runs your web app process.
+
+```bash
+sudo visudo
+```
+
+Add this line:
+
+```bash
+www-data ALL=(root) NOPASSWD: /home/noamb/wispy/wispy/.venv/bin/python /home/noamb/wispy/wispy/main.py
+```
+
+Then in the web app, execute `main.py` using the same absolute command via `sudo`.
+
+```bash
+sudo /home/noamb/wispy/wispy/.venv/bin/python /home/noamb/wispy/wispy/main.py
+```
+
 **Terminal 1 — Main tool (scan + rogue AP + sniffer):**
 
 ```bash
