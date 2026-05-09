@@ -108,3 +108,143 @@ After reloading `8188eu`, the `wlan0` interface reappeared under the correct dri
 
 ### 3.3. Scanner Validation
 With the correct driver active, `core/scanner.py` successfully sniffed 802.11 beacon frames across all 2.4 GHz channels via the built-in channel-hopping thread, identified nearby networks, and returned them for user selection. The full `main.py` flow — monitor mode → scan → network selection → AP configuration → hostapd + dnsmasq startup → sniffer — executed end-to-end without errors.
+
+---
+
+## 4. Telemetry Expansion (TLS SNI, mDNS, DHCP Option 55, JA3)
+
+This phase expanded WiSpy from DNS-focused telemetry to multi-protocol metadata capture while preserving backward compatibility with existing database files.
+
+### 4.1. Storage Layer Migration and Schema Extension
+The storage module in use by the sniffer is `analysis/storage.py` (imported by `core/sniffer.py`), so all persistence changes were implemented there.
+
+#### 4.1.1 `devices` table migration
+The `devices` table was extended with:
+- `dhcp_params` (TEXT): stores DHCP Option 55 parameter request list as a comma-separated string.
+
+To avoid breaking existing deployments:
+- `init_db()` continues using `CREATE TABLE IF NOT EXISTS`.
+- A runtime migration check was added via `PRAGMA table_info(devices)`.
+- If `dhcp_params` is missing, `ALTER TABLE devices ADD COLUMN dhcp_params TEXT` is executed.
+
+#### 4.1.2 New telemetry tables
+Three new tables were added:
+
+1. **`tls_sni`**
+   - `id` (INTEGER PK AUTOINCREMENT)
+   - `device_mac` (TEXT)
+   - `sni` (TEXT)
+   - `timestamp` (TEXT)
+
+2. **`ja3_fingerprints`**
+   - `id` (INTEGER PK AUTOINCREMENT)
+   - `device_mac` (TEXT)
+   - `ja3_hash` (TEXT)
+   - `timestamp` (TEXT)
+
+3. **`mdns_broadcasts`**
+   - `id` (INTEGER PK AUTOINCREMENT)
+   - `device_mac` (TEXT)
+   - `service_name` (TEXT)
+   - `timestamp` (TEXT)
+
+#### 4.1.3 Insert APIs and upsert updates
+Added insert helpers:
+- `insert_tls_sni(device_mac, sni)`
+- `insert_ja3(device_mac, ja3_hash)`
+- `insert_mdns(device_mac, service_name)`
+
+Updated `upsert_device(...)` to accept `dhcp_params` and preserve non-null existing values using SQL `COALESCE`, consistent with the existing partial-update strategy.
+
+Updated `reset_db()` to clear all telemetry tables and reset related SQLite sequences.
+
+### 4.2. Sniffer Expansion and Protocol Parsing
+`core/sniffer.py` was expanded with protocol-specific handlers and routing logic.
+
+#### 4.2.1 BPF scope increase
+The packet filter was widened from DNS+DHCP only to:
+
+`udp port 53 or udp port 5353 or udp port 67 or udp port 68 or tcp port 443`
+
+This enables capture for:
+- DNS (`53`)
+- mDNS (`5353`)
+- DHCP (`67/68`)
+- TLS metadata on HTTPS (`443`)
+
+#### 4.2.2 DHCP Option 55 capture
+The DHCP handler now parses:
+- `hostname`
+- `param_req_list` (Option 55)
+
+Option 55 values are normalized into a comma-separated string and persisted to `devices.dhcp_params`.
+
+#### 4.2.3 mDNS capture
+An mDNS handler was added to process `UDP/5353` packets containing DNS layers and extract:
+- query names (`qname`)
+- resource record names (`rrname`)
+
+Noise filtering rules:
+- keep only `.local` names
+- require `_` in the name to focus on service-style records (for example `_airplay._tcp.local`)
+
+Captured names are inserted into `mdns_broadcasts`.
+
+#### 4.2.4 TLS ClientHello metadata
+TLS parsing was added using `scapy.layers.tls` (import guarded with fallback when TLS layer is unavailable).
+
+For each TLS ClientHello on `TCP/443`:
+- extract SNI from extension type `0` and store in `tls_sni`
+- derive JA3-style input from version/ciphers/extensions/curves/point formats
+- hash with MD5 and store in `ja3_fingerprints`
+
+### 4.3. Deduplication and Rate Limiting Strategy
+To reduce event storms from repeated broadcasts/handshakes, in-memory time-window deduplication was implemented in `core/sniffer.py`:
+
+- `MDNS_DEDUP_WINDOW_SEC` (default: `120`)
+- `TLS_SNI_DEDUP_WINDOW_SEC` (default: `300`)
+- `JA3_DEDUP_WINDOW_SEC` (default: `300`)
+
+Dedup keys:
+- mDNS: `(device_mac, service_name)`
+- SNI: `(device_mac, sni)`
+- JA3: `(device_mac, ja3_hash)`
+
+Implementation detail:
+- A shared `_should_emit(...)` helper checks last-seen timestamps in process memory.
+- Events observed again within the configured window are skipped.
+
+Important correction made during this phase:
+- Initial mDNS duplicate prevention in the DB layer suppressed repeats indefinitely.
+- This was replaced with time-window suppression in the sniffer, preserving long-term telemetry while reducing short-term noise.
+
+### 4.4. Database Indexing for Query Performance
+Added indexes in `init_db()` using `CREATE INDEX IF NOT EXISTS`:
+
+- `idx_tls_sni_device_ts` on `tls_sni(device_mac, timestamp)`
+- `idx_ja3_device_ts` on `ja3_fingerprints(device_mac, timestamp)`
+- `idx_mdns_device_ts` on `mdns_broadcasts(device_mac, timestamp)`
+- `idx_mdns_service_name` on `mdns_broadcasts(service_name)`
+- `idx_tls_sni_value` on `tls_sni(sni)`
+
+These support common dashboard/API access patterns by device timeline and metadata lookup.
+
+### 4.5. Operational Documentation Updates
+`INSTALLATION.md` was updated to reflect the expanded telemetry behavior:
+
+- Added dependency notes for `scapy` and `python-dotenv`
+- Documented expanded capture scope (DNS, mDNS, DHCP Option 55, TLS ClientHello metadata)
+- Added privacy/data handling guidance for TLS metadata collection:
+  - SNI and JA3 hash are stored
+  - TLS payloads are not decrypted
+  - usage must be limited to authorized environments
+
+### 4.6. Verification Steps Executed
+Post-change validation performed:
+- Python syntax compilation:
+  - `python3 -m py_compile analysis/storage.py core/sniffer.py`
+- Lint/diagnostic pass on edited files:
+  - no linter errors reported
+
+Known environment limitation encountered during runtime smoke test:
+- `python-dotenv` was missing in the execution environment (`ModuleNotFoundError: dotenv`) when attempting a direct `init_db()` runtime invocation; this is an environment dependency issue, not a syntax/integration issue in the code changes.

@@ -16,7 +16,7 @@ def _connect():
 
 
 def init_db():
-    """Creates the devices and dns_requests tables if they don't already exist. Safe to call on every startup."""
+    """Creates and migrates telemetry tables. Safe to call on every startup."""
     with _connect() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS devices (
@@ -25,10 +25,16 @@ def init_db():
                 hostname   TEXT,
                 vendor     TEXT,
                 os_guess   TEXT,
+                dhcp_params TEXT,
                 first_seen TEXT,
                 last_seen  TEXT
             )
         """)
+        # Backfill new columns on existing installations.
+        cols = conn.execute("PRAGMA table_info(devices)").fetchall()
+        col_names = {row[1] for row in cols}
+        if "dhcp_params" not in col_names:
+            conn.execute("ALTER TABLE devices ADD COLUMN dhcp_params TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS dns_requests (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,10 +43,49 @@ def init_db():
                 timestamp  TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tls_sni (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_mac TEXT,
+                sni        TEXT,
+                timestamp  TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ja3_fingerprints (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_mac TEXT,
+                ja3_hash   TEXT,
+                timestamp  TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS mdns_broadcasts (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_mac   TEXT,
+                service_name TEXT,
+                timestamp    TEXT
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tls_sni_device_ts ON tls_sni(device_mac, timestamp)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ja3_device_ts ON ja3_fingerprints(device_mac, timestamp)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mdns_device_ts ON mdns_broadcasts(device_mac, timestamp)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mdns_service_name ON mdns_broadcasts(service_name)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tls_sni_value ON tls_sni(sni)"
+        )
         conn.commit()
 
 
-def upsert_device(mac, ip=None, hostname=None, vendor=None, os_guess=None):
+def upsert_device(mac, ip=None, hostname=None, vendor=None, os_guess=None, dhcp_params=None):
     """Inserts a new device or updates an existing one. Only non-None fields overwrite stored values,
     so partial updates from different sources (sniffer, fingerprinter) never erase each other."""
     now = datetime.utcnow().isoformat()
@@ -54,14 +99,15 @@ def upsert_device(mac, ip=None, hostname=None, vendor=None, os_guess=None):
                 UPDATE devices
                 SET ip=COALESCE(?,ip), hostname=COALESCE(?,hostname),
                     vendor=COALESCE(?,vendor), os_guess=COALESCE(?,os_guess),
+                    dhcp_params=COALESCE(?,dhcp_params),
                     last_seen=?
                 WHERE mac=?
-            """, (ip, hostname, vendor, os_guess, now, mac))
+            """, (ip, hostname, vendor, os_guess, dhcp_params, now, mac))
         else:
             conn.execute("""
-                INSERT INTO devices (mac, ip, hostname, vendor, os_guess, first_seen, last_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (mac, ip, hostname, vendor, os_guess, now, now))
+                INSERT INTO devices (mac, ip, hostname, vendor, os_guess, dhcp_params, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (mac, ip, hostname, vendor, os_guess, dhcp_params, now, now))
         conn.commit()
 
 
@@ -72,6 +118,45 @@ def insert_dns(device_mac, domain):
         conn.execute(
             "INSERT INTO dns_requests (device_mac, domain, timestamp) VALUES (?, ?, ?)",
             (device_mac, domain, now)
+        )
+        conn.commit()
+
+
+def insert_tls_sni(device_mac, sni):
+    """Records a TLS SNI value observed from a client hello."""
+    if not sni:
+        return
+    now = datetime.utcnow().isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO tls_sni (device_mac, sni, timestamp) VALUES (?, ?, ?)",
+            (device_mac, sni, now)
+        )
+        conn.commit()
+
+
+def insert_ja3(device_mac, ja3_hash):
+    """Records a JA3 fingerprint hash observed from a client hello."""
+    if not ja3_hash:
+        return
+    now = datetime.utcnow().isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO ja3_fingerprints (device_mac, ja3_hash, timestamp) VALUES (?, ?, ?)",
+            (device_mac, ja3_hash, now)
+        )
+        conn.commit()
+
+
+def insert_mdns(device_mac, service_name):
+    """Records an mDNS service name."""
+    if not service_name:
+        return
+    now = datetime.utcnow().isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO mdns_broadcasts (device_mac, service_name, timestamp) VALUES (?, ?, ?)",
+            (device_mac, service_name, now)
         )
         conn.commit()
 
@@ -95,7 +180,7 @@ def get_dns_requests(limit=100):
 
 
 def reset_db():
-    """Deletes all data from devices and dns_requests after user confirmation."""
+    """Deletes all data from telemetry tables after user confirmation."""
     confirm = input("This will delete ALL data from the database. Type 'yes' to confirm: ")
     if confirm.strip().lower() != 'yes':
         print("Reset cancelled.")
@@ -103,7 +188,12 @@ def reset_db():
     with _connect() as conn:
         conn.execute("DELETE FROM devices")
         conn.execute("DELETE FROM dns_requests")
-        conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('dns_requests')")
+        conn.execute("DELETE FROM tls_sni")
+        conn.execute("DELETE FROM ja3_fingerprints")
+        conn.execute("DELETE FROM mdns_broadcasts")
+        conn.execute(
+            "DELETE FROM sqlite_sequence WHERE name IN ('dns_requests', 'tls_sni', 'ja3_fingerprints', 'mdns_broadcasts')"
+        )
         conn.commit()
     print("Database reset.")
 

@@ -100,6 +100,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Required Python packages include:
+- `scapy` (packet parsing, including TLS ClientHello metadata)
+- `python-dotenv` (loading `.env` settings)
+
 ---
 
 ## Step 6 — Configure Environment Variables
@@ -174,6 +178,12 @@ sudo .venv/bin/python main.py
 
 Follow the prompts: select a network to clone, then wait for victims to connect.
 
+The sniffer now captures:
+- DNS queries (`udp/53`)
+- mDNS service broadcasts (`udp/5353`)
+- DHCP metadata including Option 55 (`udp/67-68`)
+- TLS ClientHello metadata on `tcp/443` (SNI and JA3 fingerprint hash)
+
 **Terminal 2 — Dashboard:**
 
 ```bash
@@ -183,6 +193,18 @@ python web/app.py
 ```
 
 Open a browser and go to `http://localhost:5000`.
+
+---
+
+## Privacy and Data Handling Notes
+
+WiSpy is designed to capture **unencrypted metadata** for network analysis. With TLS telemetry enabled, the tool stores:
+- TLS SNI hostnames (the requested server name in ClientHello, when present)
+- JA3 hashes (fingerprint hashes derived from TLS ClientHello parameters)
+
+It does **not** decrypt TLS payloads or capture HTTPS content bodies.
+
+Operate WiSpy only on networks and devices you are authorized to monitor, and disclose monitoring where required by policy or law.
 
 ---
 
