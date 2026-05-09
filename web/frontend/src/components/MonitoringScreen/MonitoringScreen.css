@@ -1,0 +1,55 @@
+.monitoring-screen {
+  min-height: 100vh;
+  background: #000000;
+}
+
+.monitoring-header {
+  background: rgba(0, 20, 0, 0.9);
+  border-bottom: 3px solid #00ff00;
+  padding: 1.5rem 2rem;
+  box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.monitoring-header h1 {
+  color: #00ff00;
+  font-family: 'Courier New', monospace;
+  font-size: 1.8rem;
+  letter-spacing: 3px;
+  margin-bottom: 0.5rem;
+  text-shadow: 0 0 10px rgba(0, 255, 0, 0.8);
+  text-align: center;
+}
+
+.target-info {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 2rem;
+  font-family: 'Courier New', monospace;
+  color: #00cc00;
+  font-size: 0.9rem;
+}
+
+.target-info span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-indicator {
+  color: #00ff00;
+  font-weight: bold;
+  animation: pulse-status 2s infinite;
+}
+
+@keyframes pulse-status {
+  0%, 100% {
+    text-shadow: 0 0 5px rgba(0, 255, 0, 0.8);
+  }
+  50% {
+    text-shadow: 0 0 15px rgba(0, 255, 0, 1);
+  }
+}

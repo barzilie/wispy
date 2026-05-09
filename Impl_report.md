@@ -111,6 +111,361 @@ With the correct driver active, `core/scanner.py` successfully sniffed 802.11 be
 
 ---
 
+## 4. React Frontend Development & Multi-Screen Architecture
+
+This phase involved migrating from the original command-line interface to a modern web-based UI with a multi-screen workflow, while maintaining the backend infrastructure.
+
+### 4.1. Architecture Decision: Separate Frontend/Backend
+
+**Decision:** Separate React frontend from Flask backend rather than using Flask's template engine.
+
+**Rationale:**
+- Modern development workflow with hot-reload
+- Component-based architecture for maintainability
+- Clear separation of concerns (API backend vs UI frontend)
+- Easier to develop on macOS with mock data
+
+**Implementation:**
+- Flask backend: API-only server (`web/app.py`)
+- React frontend: Standalone SPA (`web/frontend/`)
+- Communication: REST API over HTTP
+- CORS enabled for cross-origin requests during development
+
+### 4.2. Multi-Screen User Flow
+
+The original `main.py` command-line flow was replaced with a three-screen web interface:
+
+**Screen 1: Start Screen** (`components/StartScreen/`)
+- Landing page with WiSpy ASCII logo
+- "INITIATE SCAN" button to begin
+- Shows loading state during scan
+- Warning about authorized use only
+
+**Screen 2: Network Selection Screen** (`components/NetworkSelectionScreen/`)
+- Displays all detected WiFi networks
+- Shows SSID, BSSID, channel, encryption, signal strength
+- Visual signal strength indicators (▰▰▰▰▰)
+- Click network to select as target
+- Loading overlay during AP deployment
+
+**Screen 3: Monitoring Screen** (`components/MonitoringScreen/`)
+- Real-time dashboard (original dashboard functionality)
+- Device cards showing connected clients
+- DNS query table
+- AI attack recommendations panel
+- Shows selected target network in header
+
+### 4.3. Component Architecture
+
+**Pattern Established:** Every component follows a 3-file structure:
+- `.jsx` - Component structure (React/HTML)
+- `.logic.js` - Business logic and utility functions
+- `.css` - Component-specific styling
+
+**Reasoning:**
+- Clear separation of concerns
+- Logic reusable and testable independently
+- Consistent project structure
+- Easier to navigate and maintain
+
+**Components Created:**
+- `StartScreen` - Initial landing page
+- `NetworkSelectionScreen` - Network picker
+- `MonitoringScreen` - Dashboard wrapper
+- `Header` - App header (original, kept for consistency)
+- `DeviceList` - Grid container for devices
+- `DeviceCard` - Individual device display
+- `DnsTable` - DNS queries table
+- `RecommendationsPanel` - AI recommendations UI
+
+### 4.4. Custom React Hooks
+
+**Created three custom hooks for state management:**
+
+**`useAppFlow.js`:**
+- Manages screen transitions (start → selection → monitoring)
+- Handles WiFi scanning API call
+- Handles network selection API call
+- Stores selected network and networks list
+- Manages loading and error states
+
+**`useWispyData.js`:**
+- Fetches device and DNS data from `/api/data`
+- Auto-refreshes every 2 seconds
+- Manages error states for data fetching
+- Used only on monitoring screen
+
+**`useRecommendations.js`:**
+- Handles AI recommendation requests
+- Manages loading state during AI processing
+- Error handling for recommendation failures
+
+**Pattern:** All data fetching logic isolated in custom hooks, components remain presentational.
+
+### 4.5. API Endpoint Updates
+
+**New endpoints added to `web/app.py`:**
+
+**`POST /api/start-scan`:**
+- Triggers WiFi network scanning
+- Returns list of networks (mock or real based on mode)
+- Stores networks in server-side state
+- Returns: `{'status': 'complete', 'networks': [...], 'mock_mode': bool}`
+
+**`POST /api/select-network`:**
+- Receives selected SSID from frontend
+- Stores selection in server state
+- In real mode: would trigger rogue AP deployment
+- Returns: `{'status': 'success', 'network': {...}}`
+
+**`GET /api/status`:**
+- Returns current system state
+- Shows scanning/monitoring status
+- Returns mode information (mock vs real)
+- Used for debugging and monitoring
+
+**Existing endpoints maintained:**
+- `GET /api/data` - Device and DNS queries (unchanged)
+- `POST /api/recommend` - AI recommendations (unchanged)
+
+### 4.6. Mock Data System Implementation
+
+**Problem:** Need to develop UI on macOS without Kali Linux hardware.
+
+**Solution:** Automatic platform detection with mock data system.
+
+**Implementation:**
+
+**`config.py`:**
+- Central configuration file
+- Auto-detects platform (Darwin = macOS, Linux = Kali)
+- Sets `MOCK_MODE` based on platform
+- Can override with `WISPY_MOCK_MODE` environment variable
+- Prints startup banner showing current mode
+
+**`mock/mock_networks.py`:**
+- Contains `MOCK_NETWORKS` list
+- Editable fake WiFi networks for development
+- Includes realistic SSID, BSSID, channel, encryption, signal
+- Easy to add/modify networks for testing different scenarios
+
+**`mock_data.py`:**
+- Script to populate SQLite with fake device data
+- Generates realistic devices with hostnames, vendors, OS
+- Creates fake DNS query history
+- `--more` flag to add additional queries
+- `--reset` flag to clear and regenerate
+
+**Mode Detection Flow:**
+```python
+# config.py
+IS_MACOS = platform.system() == 'Darwin'
+MOCK_MODE = os.getenv('WISPY_MOCK_MODE', 'true' if IS_MACOS else 'false')
+
+# web/app.py
+if MOCK_MODE:
+    from mock.mock_networks import get_mock_networks
+else:
+    from core.scanner import enable_monitor_mode, scan_networks
+```
+
+**Benefits:**
+- Seamless development on macOS
+- No code changes needed when deploying to Kali
+- Same codebase runs in both environments
+- Clear indication of current mode in logs
+
+### 4.7. Styling: Hacker Theme Implementation
+
+**Design Goal:** Create a cyberpunk/terminal aesthetic fitting the tool's nature.
+
+**Theme Features:**
+- Matrix green (#00ff00) on black background
+- Monospace font (Courier New) throughout
+- CRT screen scanline effect overlay
+- Glowing text with text-shadow effects
+- Terminal-style borders (no border-radius)
+- Uppercase labels with letter-spacing
+- Animated effects (glitch, pulse, scan)
+
+**Key CSS Techniques:**
+
+**Scanlines Effect:**
+```css
+body::before {
+  content: '';
+  background: repeating-linear-gradient(...);
+  animation: scanlines 8s linear infinite;
+}
+```
+
+**Glowing Text:**
+```css
+text-shadow: 
+  0 0 10px rgba(0, 255, 0, 0.8),
+  0 0 20px rgba(0, 255, 0, 0.6);
+```
+
+**Hover Effects:**
+```css
+.network-item:hover {
+  box-shadow: 
+    0 0 20px rgba(0, 255, 0, 0.6),
+    inset 0 0 20px rgba(0, 255, 0, 0.1);
+}
+```
+
+### 4.8. Development Workflow Improvements
+
+**Problem:** Need to start both Flask backend and React frontend separately.
+
+**Solution:** Created launcher scripts.
+
+**`start_wispy.py`:**
+- Python launcher script
+- Checks dependencies (venv, npm)
+- Starts Flask backend in background
+- Starts React frontend
+- Handles Ctrl+C gracefully (stops both)
+- Cross-platform (macOS and Kali)
+
+**`start.sh`:**
+- Bash alternative to Python launcher
+- Same functionality
+- Executable: `chmod +x start.sh`
+
+**Documentation Created:**
+- `STARTUP_GUIDE.md` - Detailed startup instructions
+- `README_STARTUP.md` - Quick TL;DR
+- `MOCK_MODE_GUIDE.md` - Complete mock data documentation
+- `FILES_OVERVIEW.md` - Project file navigation guide
+- `COMPONENTS.md` - React component documentation
+
+### 4.9. Port Configuration
+
+**Issue:** Default port 3000 conflicted with Claude Code manager on macOS.
+
+**Resolution:**
+- React dev server moved to port 3001
+- Configured via `.env` file in `web/frontend/`
+- Flask remains on port 5000
+- Dashboard URL: `http://localhost:3001`
+
+**Configuration:**
+```bash
+# web/frontend/.env
+PORT=3001
+BROWSER=none
+```
+
+### 4.10. Current State and Limitations
+
+**Completed Features:**
+- ✅ Three-screen user flow (start → select → monitor)
+- ✅ WiFi network scanning API (mock and real modes)
+- ✅ Network selection and storage
+- ✅ Real-time device and DNS monitoring
+- ✅ Hacker-themed UI with animations
+- ✅ Mock data system for development
+- ✅ Auto-detection of platform
+- ✅ Component-based architecture
+- ✅ Custom React hooks for state management
+
+**Not Yet Implemented:**
+- ⚠️ AI recommendations (endpoint exists but `analysis/recommender.py` not implemented)
+- ⚠️ Actual rogue AP deployment on network selection (mock mode only)
+- ⚠️ Integration between network selection and `main.py` flow
+- ⚠️ Real-time status indicators on monitoring screen
+- ⚠️ Network deauthentication (`core/deauth.py` exists but not integrated)
+
+**Known Issues:**
+- `main.py` is incompatible with new React UI (old command-line version)
+- Network selection doesn't actually start sniffer in real mode yet
+- Monitoring screen always shows mock device data regardless of mode
+- No graceful error handling if wireless adapter not found in real mode
+
+---
+
+## 5. Next Steps
+
+### 5.1. Backend Integration (Real Mode)
+
+**Remaining work to make real mode functional:**
+
+1. **Network Selection → AP Deployment:**
+   - When user selects network in real mode, trigger actual AP setup
+   - Call `core/ap_manager.py` functions
+   - Start `hostapd` and `dnsmasq`
+   - Enable routing and NAT
+
+2. **Automatic Sniffer Start:**
+   - After AP is live, automatically start `core/sniffer.py`
+   - Sniffer should run as background process
+   - Write captured data to SQLite (already implemented)
+
+3. **Process Management:**
+   - Track running processes (hostapd, dnsmasq, sniffer)
+   - Graceful shutdown on user exit
+   - Cleanup iptables rules on shutdown
+
+### 5.2. AI Recommender Implementation
+
+**`analysis/recommender.py` needs to be built:**
+- Get session summary from `get_session_summary()` in `storage.py`
+- Format data for AI prompt
+- Call Google Gemini API
+- Parse and return recommendations
+- Handle API errors gracefully
+
+### 5.3. Error Handling and User Feedback
+
+- Better error messages when hardware missing
+- Connection status indicators on monitoring screen
+- Progress feedback during AP deployment
+- Validation before starting real mode operations
+
+### 5.4. Testing
+
+- End-to-end test on actual Kali Linux
+- Verify driver compatibility
+- Test rogue AP deployment
+- Validate packet capture
+- Confirm database writes
+
+---
+
+## 6. Lessons Learned
+
+### 6.1. Separation of Concerns
+The decision to separate React frontend from Flask backend proved beneficial:
+- Easier development on macOS
+- Cleaner code organization
+- Independent testing of UI and backend
+- Hot-reload during development
+
+### 6.2. Mock Data System
+Auto-detection of platform eliminated manual configuration:
+- No code changes needed between environments
+- Clear visibility of current mode
+- Reduced development friction
+- Made frontend development possible without hardware
+
+### 6.3. Component Architecture
+The 3-file component pattern (jsx/logic/css) provided:
+- Clear code organization
+- Reusable logic functions
+- Easier testing and maintenance
+- Consistent project structure
+
+### 6.4. Custom Hooks
+Isolating API logic in custom hooks:
+- Simplified components (presentational only)
+- Centralized data fetching logic
+- Easy to modify API behavior
+- Better state management
+
+---
+
 ## 4. Telemetry Expansion (TLS SNI, mDNS, DHCP Option 55, JA3)
 
 This phase expanded WiSpy from DNS-focused telemetry to multi-protocol metadata capture while preserving backward compatibility with existing database files.

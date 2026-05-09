@@ -1,0 +1,73 @@
+.dns-table-container {
+  overflow-x: auto;
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid #00ff00;
+  background: #000000;
+}
+
+.dns-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.dns-table thead {
+  background: rgba(0, 255, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.dns-table th {
+  padding: 1rem;
+  text-align: left;
+  color: #00ff00;
+  font-weight: bold;
+  border-bottom: 2px solid #00ff00;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-family: 'Courier New', monospace;
+  text-shadow: 0 0 5px rgba(0, 255, 0, 0.6);
+}
+
+.dns-table th::before {
+  content: '▸ ';
+  color: #00cc00;
+}
+
+.dns-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(0, 255, 0, 0.2);
+  font-family: 'Courier New', monospace;
+}
+
+.dns-table tbody tr {
+  transition: all 0.2s ease;
+}
+
+.dns-table tbody tr:hover {
+  background: rgba(0, 255, 0, 0.1);
+  box-shadow: inset 3px 0 0 #00ff00;
+}
+
+.dns-table tbody tr:nth-child(odd) {
+  background: rgba(0, 255, 0, 0.03);
+}
+
+.dns-table .domain {
+  color: #00ff00;
+  font-family: 'Courier New', monospace;
+  text-shadow: 0 0 3px rgba(0, 255, 0, 0.4);
+}
+
+.dns-table .device-mac {
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #00cc00;
+  opacity: 0.8;
+}
+
+.dns-table td:first-child {
+  color: #00ff00;
+  font-size: 0.85rem;
+}

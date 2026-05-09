@@ -216,3 +216,30 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node.js / React
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+package-lock.json
+yarn.lock
+
+# React build output
+web/frontend/build/
+web/frontend/dist/
+
+# React environment
+web/frontend/.env.local
+web/frontend/.env.development.local
+web/frontend/.env.test.local
+web/frontend/.env.production.local
+
+# WiSpy specific
+data/
+*.db
+*.db-journal
+config/hostapd.conf
+config/dnsmasq.conf
+/tmp/wispy_*

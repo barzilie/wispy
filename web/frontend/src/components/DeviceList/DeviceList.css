@@ -1,0 +1,21 @@
+.devices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.devices-grid::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: #00ff00;
+  animation: grid-scan 2s linear infinite;
+}
+
+@keyframes grid-scan {
+  0% { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
