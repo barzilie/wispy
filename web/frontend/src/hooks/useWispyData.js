@@ -12,6 +12,10 @@ const useWispyData = (refreshInterval = 2000) => {
   const [tlsSni, setTlsSni] = useState([]);
   const [ja3Rows, setJa3Rows] = useState([]);
   const [mdnsRows, setMdnsRows] = useState([]);
+  const [flows, setFlows] = useState([]);
+  const [flowsTotal, setFlowsTotal] = useState(0);
+  const [plaintextEvents, setPlaintextEvents] = useState([]);
+  const [plaintextTotal, setPlaintextTotal] = useState(0);
   const [error, setError] = useState(null);
   const [loadingMoreDns, setLoadingMoreDns] = useState(false);
   const [olderExhausted, setOlderExhausted] = useState(false);
@@ -39,6 +43,10 @@ const useWispyData = (refreshInterval = 2000) => {
         setTlsSni(dataJson.tls_sni || []);
         setJa3Rows(dataJson.ja3 || []);
         setMdnsRows(dataJson.mdns || []);
+        setFlows(dataJson.flows || []);
+        setFlowsTotal(dataJson.flows_total ?? 0);
+        setPlaintextEvents(dataJson.plaintext || []);
+        setPlaintextTotal(dataJson.plaintext_total ?? 0);
         setOlderExhausted((dnsJson.total ?? 0) <= rows.length);
         if (rows.length) {
           maxIdRef.current = Math.max(...rows.map((r) => r.id));
@@ -67,6 +75,10 @@ const useWispyData = (refreshInterval = 2000) => {
         setTlsSni(dataJson.tls_sni || []);
         setJa3Rows(dataJson.ja3 || []);
         setMdnsRows(dataJson.mdns || []);
+        setFlows(dataJson.flows || []);
+        setFlowsTotal(dataJson.flows_total ?? 0);
+        setPlaintextEvents(dataJson.plaintext || []);
+        setPlaintextTotal(dataJson.plaintext_total ?? 0);
 
         const mid = maxIdRef.current;
         if (mid == null) {
@@ -161,6 +173,10 @@ const useWispyData = (refreshInterval = 2000) => {
     tlsSni,
     ja3Rows,
     mdnsRows,
+    flows,
+    flowsTotal,
+    plaintextEvents,
+    plaintextTotal,
     error,
     loadMoreDns,
     loadingMoreDns,

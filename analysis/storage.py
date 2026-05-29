@@ -14,7 +14,10 @@ _TELEMETRY_TABLES = frozenset({
     "tls_sni",
     "ja3_fingerprints",
     "mdns_broadcasts",
+    "flow_sessions",
+    "plaintext_events",
 })
+
 
 
 def _connect():
@@ -75,6 +78,34 @@ def init_db():
                 timestamp    TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS flow_sessions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_mac    TEXT,
+                proto         TEXT,
+                src_ip        TEXT,
+                dst_ip        TEXT,
+                dst_port      INTEGER,
+                dst_host      TEXT,
+                host_source   TEXT,
+                first_seen    TEXT,
+                last_seen     TEXT,
+                packet_count  INTEGER,
+                byte_count    INTEGER,
+                service_label TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS plaintext_events (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_mac        TEXT,
+                proto             TEXT,
+                host_or_server    TEXT,
+                method_or_command TEXT,
+                body              TEXT,
+                timestamp         TEXT
+            )
+        """)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tls_sni_device_ts ON tls_sni(device_mac, timestamp)"
         )
@@ -92,6 +123,15 @@ def init_db():
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_dns_device_mac ON dns_requests(device_mac)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_flows_device_last_seen ON flow_sessions(device_mac, last_seen)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_flows_dst_ip ON flow_sessions(dst_ip)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_plaintext_device_ts ON plaintext_events(device_mac, timestamp)"
         )
         conn.commit()
 
@@ -170,6 +210,62 @@ def insert_mdns(device_mac, service_name):
             (device_mac, service_name, now)
         )
         conn.commit()
+
+
+def upsert_flow_session(device_mac, proto, src_ip, dst_ip, dst_port, dst_host, host_source, packet_count, byte_count, first_seen, last_seen, service_label=None):
+    """Inserts a new flow session or aggregates updates into an existing recent session."""
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        # Find the latest session for this flow key
+        row = conn.execute("""
+            SELECT id, first_seen, last_seen, packet_count, byte_count, dst_host, host_source
+            FROM flow_sessions
+            WHERE device_mac = ? AND proto = ? AND src_ip = ? AND dst_ip = ? AND dst_port = ?
+            ORDER BY last_seen DESC LIMIT 1
+        """, (device_mac, proto, src_ip, dst_ip, dst_port)).fetchone()
+
+        idle_timeout_sec = 60
+        should_update = False
+        if row:
+            try:
+                row_last_seen = datetime.fromisoformat(row["last_seen"])
+                new_first_seen = datetime.fromisoformat(first_seen)
+                if (new_first_seen - row_last_seen).total_seconds() <= idle_timeout_sec:
+                    should_update = True
+            except Exception:
+                pass
+
+        if should_update:
+            new_dst_host = dst_host if dst_host and dst_host != "unknown" else row["dst_host"]
+            new_host_source = host_source if host_source != "unknown" else row["host_source"]
+            conn.execute("""
+                UPDATE flow_sessions
+                SET last_seen = ?,
+                    packet_count = packet_count + ?,
+                    byte_count = byte_count + ?,
+                    dst_host = ?,
+                    host_source = ?,
+                    service_label = COALESCE(?, service_label)
+                WHERE id = ?
+            """, (last_seen, packet_count, byte_count, new_dst_host, new_host_source, service_label, row["id"]))
+        else:
+            conn.execute("""
+                INSERT INTO flow_sessions (device_mac, proto, src_ip, dst_ip, dst_port, dst_host, host_source, first_seen, last_seen, packet_count, byte_count, service_label)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (device_mac, proto, src_ip, dst_ip, dst_port, dst_host, host_source, first_seen, last_seen, packet_count, byte_count, service_label))
+        conn.commit()
+
+
+def insert_plaintext(device_mac, proto, host_or_server, method_or_command, body):
+    """Records a single plaintext HTTP/SMTP event with its full body."""
+    now = datetime.utcnow().isoformat()
+    with _connect() as conn:
+        conn.execute("""
+            INSERT INTO plaintext_events (device_mac, proto, host_or_server, method_or_command, body, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (device_mac, proto, host_or_server, method_or_command, body, now))
+        conn.commit()
+
 
 
 def get_devices():
@@ -330,6 +426,49 @@ def get_mdns(
     )
 
 
+def get_flow_sessions(
+    limit=100,
+    offset=0,
+    device_mac=None,
+    after_id=None,
+    before_id=None,
+):
+    return _fetch_telemetry(
+        "flow_sessions",
+        limit,
+        offset,
+        device_mac,
+        after_id,
+        before_id,
+    )
+
+
+def count_flow_sessions(device_mac=None):
+    return _count_telemetry("flow_sessions", device_mac)
+
+
+def get_plaintext_events(
+    limit=100,
+    offset=0,
+    device_mac=None,
+    after_id=None,
+    before_id=None,
+):
+    return _fetch_telemetry(
+        "plaintext_events",
+        limit,
+        offset,
+        device_mac,
+        after_id,
+        before_id,
+    )
+
+
+def count_plaintext_events(device_mac=None):
+    return _count_telemetry("plaintext_events", device_mac)
+
+
+
 def reset_db():
     """Deletes all data from telemetry tables after user confirmation."""
     confirm = input("This will delete ALL data from the database. Type 'yes' to confirm: ")
@@ -342,8 +481,10 @@ def reset_db():
         conn.execute("DELETE FROM tls_sni")
         conn.execute("DELETE FROM ja3_fingerprints")
         conn.execute("DELETE FROM mdns_broadcasts")
+        conn.execute("DELETE FROM flow_sessions")
+        conn.execute("DELETE FROM plaintext_events")
         conn.execute(
-            "DELETE FROM sqlite_sequence WHERE name IN ('dns_requests', 'tls_sni', 'ja3_fingerprints', 'mdns_broadcasts')"
+            "DELETE FROM sqlite_sequence WHERE name IN ('dns_requests', 'tls_sni', 'ja3_fingerprints', 'mdns_broadcasts', 'flow_sessions', 'plaintext_events')"
         )
         conn.commit()
     print("Database reset.")
@@ -356,6 +497,7 @@ def get_session_summary():
     tls = get_tls_sni(limit=4000, offset=0)
     ja3 = get_ja3(limit=4000, offset=0)
     mdns = get_mdns(limit=4000, offset=0)
+    flows = get_flow_sessions(limit=4000, offset=0)
 
     domains_by_mac = defaultdict(set)
     for r in dns:
@@ -373,6 +515,19 @@ def get_session_summary():
     for r in mdns:
         if r.get("service_name"):
             mdns_by_mac[r["device_mac"]].add(r["service_name"])
+            
+    flows_by_mac = defaultdict(list)
+    for r in flows:
+        flows_by_mac[r["device_mac"]].append({
+            "proto": r["proto"],
+            "dst_ip": r["dst_ip"],
+            "dst_port": r["dst_port"],
+            "dst_host": r["dst_host"],
+            "host_source": r["host_source"],
+            "packet_count": r["packet_count"],
+            "byte_count": r["byte_count"],
+            "service_label": r["service_label"]
+        })
 
     summary = []
     for device in devices:
@@ -388,6 +543,7 @@ def get_session_summary():
             "tls_sni": list(sni_by_mac[mac]),
             "ja3_fingerprints": list(ja3_by_mac[mac]),
             "mdns_services": list(mdns_by_mac[mac]),
+            "flows": flows_by_mac[mac]
         })
     return summary
 

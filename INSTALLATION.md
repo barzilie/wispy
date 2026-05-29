@@ -121,10 +121,13 @@ nano .env
 
 | Variable | Description |
 |---|---|
-| `GOOGLE_API_KEY` | API key from [Google AI Studio](https://aistudio.google.com/) — required for AI recommendations |
+| `GOOGLE_API_KEY` | API key from [Google AI Studio](https://aistudio.google.com/) — required for agentic investigation and recommendations |
 | `WIFI_INTERFACE` | Your wireless interface name (default: `wlan0`) — check with `iw dev` |
+| `OUTBOUND_INTERFACE` | Uplink for NAT when the rogue AP is live (default: `eth0`) — check with `ip link` |
 | `FLASK_HOST` | Dashboard bind address (default: `0.0.0.0`) |
 | `FLASK_PORT` | Dashboard port (default: `5000`) |
+| `WISPY_MOCK_MODE` | Set `false` on Kali for real Wi‑Fi/AP capture; `true` forces mock data |
+| `WISPY_SNIFFER_SUDO` | Set `true` to run `core/sniffer.py` via `sudo -n` from the UI (requires passwordless sudo for your venv Python + sniffer path) |
 
 ---
 
@@ -149,78 +152,124 @@ You should see a list of nearby Wi-Fi networks.
 
 ## Step 8 — Run WiSpy
 
-WiSpy runs as **two separate processes**. Open two terminals.
+WiSpy uses a **Flask API** plus a **React dashboard**. Packet capture runs in `core/sniffer.py`, which writes to `data/wispy.db`.
 
-### 8.1 Optional: allow web app to run `main.py` without sudo password
+### 8.1 Recommended — React UI (development or lab with mock data)
 
-If the dashboard needs to start/stop `main.py` itself, add a restricted `sudoers` rule with `visudo`.
-
-> Replace `www-data` with the Linux user that runs your web app process.
+From the project root:
 
 ```bash
-sudo visudo
+source .venv/bin/activate
+python mock_data.py          # optional: seed sample telemetry
+python start_wispy.py        # starts Flask :5000 and React :3001
 ```
 
-Add this line:
+Open **http://localhost:3001**, click **Initiate scan**, pick a network, then open the monitoring screen.
+
+On **macOS**, mock mode is automatic (`WISPY_MOCK_MODE` defaults to on). On **Kali**, set `WISPY_MOCK_MODE=false` in `.env` for real Wi‑Fi/AP (see §8.2).
+
+> Do **not** use `main.py` with the React UI — it is the legacy CLI launcher only.
+
+### 8.2 Kali Linux — real rogue AP from the React UI
+
+1. Set in `.env`: `WISPY_MOCK_MODE=false`, correct `WIFI_INTERFACE`, and `OUTBOUND_INTERFACE` (usually `eth0`).
+2. Configure **passwordless sudo** for the user running Flask so `core/ap_manager.py` can invoke `sudo hostapd`, `sudo dnsmasq`, `sudo ip`, `sudo iptables`, `sudo iwconfig`, etc. (see `Impl_report.md` §1.3). Paths must match your install.
+3. Start the stack: `python start_wispy.py` (Flask runs as your normal user).
+4. In the UI: **Initiate scan** → select target network. This calls `POST /api/select-network`, which starts `hostapd`, `dnsmasq`, and `core/sniffer.py` as background processes.
+5. Connect a test client to the cloned SSID. Telemetry appears on the monitoring screen within a few seconds.
+
+**Sniffer permissions:** `scapy.sniff()` usually requires **root** or `CAP_NET_RAW`. If flows/DNS stay empty after a client connects, run the sniffer manually in a second terminal while the AP is up:
 
 ```bash
-www-data ALL=(root) NOPASSWD: /home/noamb/wispy/wispy/.venv/bin/python /home/noamb/wispy/wispy/main.py
+cd ~/wispy
+sudo .venv/bin/python core/sniffer.py
 ```
 
-Then in the web app, execute `main.py` using the same absolute command via `sudo`.
+To stop the rogue AP from the API: `POST /api/stop-ap` (or exit Flask — `atexit` runs cleanup).
 
-```bash
-sudo /home/noamb/wispy/wispy/.venv/bin/python /home/noamb/wispy/wispy/main.py
-```
+### 8.3 Legacy — CLI `main.py` (Kali, all-in-one terminal)
 
-**Terminal 1 — Main tool (scan + rogue AP + sniffer):**
+Still supported for headless lab use. Requires root:
 
 ```bash
 cd ~/wispy
 sudo .venv/bin/python main.py
 ```
 
-Follow the prompts: select a network to clone, then wait for victims to connect.
+Follow prompts: scan → select network → AP + sniffer start in one process tree.
 
-The sniffer now captures:
-- DNS queries (`udp/53`)
-- mDNS service broadcasts (`udp/5353`)
-- DHCP metadata including Option 55 (`udp/67-68`)
-- TLS ClientHello metadata on `tcp/443` (SNI and JA3 fingerprint hash)
+### 8.4 What the sniffer captures
 
-**Terminal 2 — Dashboard:**
+BPF filter (see `core/sniffer.py`):
 
-```bash
-cd ~/wispy
-source .venv/bin/activate
-python web/app.py
-```
+`udp port 53 or udp port 5353 or udp port 67 or udp port 68 or tcp port 443 or tcp port 80 or tcp port 25`
 
-Open a browser and go to `http://localhost:5000` for the **legacy** Flask template UI, or use the **React** dashboard (recommended): in another terminal run `cd web/frontend && npm start` and open `http://localhost:3001`. The React app proxies API calls to Flask on port 5000.
+| Traffic | Stored as |
+|--------|-----------|
+| DNS queries | `dns_requests` (ad/tracking domains filtered) |
+| DNS responses | In-memory IP→hostname cache (`analysis/correlation.py`) for flow labeling |
+| DHCP | `devices` (hostname, Option 55 in `dhcp_params`) |
+| mDNS (`.local` services) | `mdns_broadcasts` |
+| TLS ClientHello on 443 | `tls_sni`, `ja3_fingerprints` |
+| TCP/UDP flows on filtered ports | `flow_sessions` (duration, bytes; `dst_host` from **SNI** or **DNS** cache, `host_source`: `sni` / `dns` / `unknown`) |
+| Cleartext HTTP (80) / SMTP (25) | `plaintext_events` (method/command, host/server, captured plaintext segment in `body`) |
 
-The JSON API (`GET /api/data`) returns devices, DNS totals, and recent rows for **TLS SNI**, **JA3**, and **mDNS** (see `web/app.py`). On macOS or when using mock mode, run `python mock_data.py` (or `python mock_data.py --reset`) to populate sample rows for all telemetry types.
+Flow rows are flushed to SQLite every ~5 seconds. Plaintext HTTP/SMTP uses a 60s dedup window.
+
+### 8.5 API and dashboard surfaces
+
+Key endpoints (`web/app.py`):
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/data` | Devices (with `patterns` / `flow_stats`), DNS slice, TLS, JA3, mDNS, **flows**, **plaintext** |
+| `GET /api/dns`, `GET /api/flows`, `GET /api/plaintext` | Paginated feeds |
+| `POST /api/start-scan`, `POST /api/select-network`, `POST /api/stop-ap` | UI workflow + real-mode AP |
+| `POST /api/agent/investigate` | Agentic session investigation (Gemini) |
+| `POST /api/agent/recommend`, `POST /api/recommend` | Agentic next-step suggestions (alias) |
+
+React monitoring UI (`http://localhost:3001`): device cards, DNS table/charts, telemetry tables, **Session Reconnaissance (flows)**, **Plaintext leaks**, and **Agentic** panel (investigate vs recommend tabs).
+
+Legacy template UI: `http://localhost:5000` (fewer extension panels).
+
+Seed mock telemetry: `python mock_data.py` or `python mock_data.py --reset`.
 
 ---
 
-## Privacy and Data Handling Notes
+## Step 9 — Privacy and Data Handling Notes
 
-WiSpy is designed to capture **unencrypted metadata** for network analysis. With TLS telemetry enabled, the tool stores:
-- TLS SNI hostnames (the requested server name in ClientHello, when present)
-- JA3 hashes (fingerprint hashes derived from TLS ClientHello parameters)
+WiSpy is for **authorized lab use only**.
 
-It does **not** decrypt TLS payloads or capture HTTPS content bodies.
+**Collected (metadata and selective cleartext):**
 
-Operate WiSpy only on networks and devices you are authorized to monitor, and disclose monitoring where required by policy or law.
+- DNS names, DHCP hostname/Option 55, mDNS service names
+- TLS **SNI** and **JA3** hashes (from ClientHello only)
+- **Flow sessions**: IPs, ports, timing, packet/byte counts; hostnames when inferred from SNI or recent DNS answers
+- **Plaintext HTTP/SMTP** on ports 80/25 when not TLS-wrapped: request line / commands and a stored **body** field (captured segment only)
+
+**Not collected:**
+
+- Decrypted HTTPS/TLS application data
+- MITM or credential harvesting
+
+Operate only on networks and devices you are permitted to monitor.
 
 ---
 
-## Troubleshooting
+## Step 10 — Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `sudo: hostapd: command not found` | `sudo apt install hostapd -y` |
 | `iw dev` shows no wireless interface | Reload driver: `sudo modprobe -r 8188eu && sudo modprobe 8188eu` |
 | Scanner finds 0 networks | Check driver with `lsmod \| grep rtl` — `rtl8xxxu` must not be listed |
-| Dashboard shows nothing | Make sure `main.py` (or `core/sniffer.py`) is running in another terminal first, or load mock data with `python mock_data.py` |
-| TLS / JA3 / mDNS panels empty | Normal until clients generate HTTPS (443) or mDNS (5353) traffic on the rogue segment; use `mock_data.py` to verify the UI |
-| DHCP leases not assigned | Check dnsmasq output in Terminal 1; ensure `wlan0` has IP `192.168.50.1` (`ip addr show wlan0`) |
+| Dashboard empty on macOS | Run `python mock_data.py`; confirm `GET /api/status` shows `mock_mode: true` |
+| Real mode: AP up but no DNS/flows | Run sniffer with sudo (§8.2); confirm client uses rogue DNS; check `data/wispy.db` |
+| `Permission denied` starting AP from UI | Configure sudoers for `hostapd`, `dnsmasq`, `ip`, `iptables`, `iwconfig` (§8.2) |
+| Flow host shows IP only | Normal until DNS reply or TLS SNI arrives; wait for HTTPS/DNS activity |
+| TLS / JA3 / mDNS empty | Client must use 443 / mDNS on the rogue LAN; use `mock_data.py` to verify UI |
+| Plaintext panel empty | Expected on modern HTTPS-only clients; rare HTTP/SMTP cleartext only |
+| Agentic buttons error | Set `GOOGLE_API_KEY` in `.env`; check Flask logs for Gemini model errors |
+| React cannot reach API | Flask must be on `:5000`; frontend proxy expects port 5000 |
+| DHCP leases not assigned | Check dnsmasq logs; `ip addr show wlan0` should show AP IP (e.g. `192.168.50.1`) |
+| NAT works but no internet on rogue LAN | Set `OUTBOUND_INTERFACE` to your uplink (`eth0`, `wlan1`, etc.) |

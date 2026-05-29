@@ -1,0 +1,55 @@
+/* PlaintextPanel styling */
+
+.plaintext-count,
+.plaintext-empty {
+  color: #888888;
+  font-size: 0.85rem;
+  font-weight: normal;
+}
+
+.plaintext-badge {
+  background-color: rgba(255, 50, 50, 0.2);
+  color: #ff3333;
+  border: 1px solid #ff3333;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  font-weight: bold;
+  animation: pulse-red 1.5s infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; box-shadow: 0 0 10px rgba(255, 50, 50, 0.5); }
+}
+
+.plaintext-row-leak {
+  background-color: rgba(255, 50, 50, 0.05) !important;
+}
+
+.plaintext-empty {
+  color: #008800;
+  font-family: 'Courier New', monospace;
+  font-size: 1rem;
+  text-align: center;
+  padding: 2rem;
+}
+
+.plaintext-payload-pre {
+  margin: 0.5rem 0 0 0;
+  padding: 0.75rem;
+  background-color: #080808;
+  border: 1px dashed #ff3333;
+  color: #ff6666;
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.plaintext-method {
+  color: #ff8800;
+  font-weight: bold;
+}

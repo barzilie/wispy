@@ -33,12 +33,16 @@ python mock_data.py
 |------|---------|
 | `web/app.py` | Flask API server (all endpoints) |
 | `core/scanner.py` | WiFi scanning (real mode) |
-| `core/sniffer.py` | Packet capture: DNS, DHCP (incl. Option 55), mDNS, TLS ClientHello (SNI + JA3) |
+| `core/sniffer.py` | Packet capture: DNS, DHCP, mDNS, TLS (SNI/JA3), flow sessions, plaintext HTTP/SMTP |
 | `core/ap_manager.py` | Rogue AP setup (hostapd/dnsmasq) |
 | `core/fingerprint.py` | Device OS detection |
-| `analysis/storage.py` | SQLite layer (devices, DNS, `tls_sni`, `ja3_fingerprints`, `mdns_broadcasts`) |
+| `analysis/storage.py` | SQLite: devices, DNS, TLS, mDNS, `flow_sessions`, `plaintext_events` |
+| `analysis/correlation.py` | In-memory DNS reply → IP cache for flow hostname labeling |
+| `analysis/patterns.py` | Per-device usage-pattern heuristics for agentic context |
 | `analysis/dns_filters.py` | Regex helpers to skip ad-tech DNS before storage |
-| `analysis/recommender.py` | Gemini-based session summary → recommendations |
+| `analysis/agentic/` | Unified Gemini module: `client`, `context`, investigation + recommend prompts |
+| `analysis/recommender.py` | Thin shim → `analysis.agentic` |
+| `extension.md` | TA feedback extension plan and track roadmap |
 
 ## ⚛️ Frontend (React)
 
@@ -67,7 +71,9 @@ ComponentName/
 - `DnsTable` - DNS queries (infinite scroll via `/api/dns`)
 - `DnsAnalytics` - DNS charts (Recharts)
 - `TelemetryTables` - TLS SNI, JA3, and mDNS tables
-- `RecommendationsPanel` - AI recommendations
+- `FlowAnalytics` - Session reconnaissance (flows, DNS/SNI resolution badges)
+- `PlaintextPanel` - Cleartext HTTP/SMTP leaks with expandable bodies
+- `AgenticPanel` / `RecommendationsPanel` - Tabbed AI: session investigation + attack suggestions
 
 ## 📚 Documentation
 
@@ -86,7 +92,7 @@ ComponentName/
 
 | File/Directory | Purpose |
 |----------------|---------|
-| `data/wispy.db` | SQLite DB: devices (incl. `dhcp_params`), DNS, TLS SNI, JA3, mDNS |
+| `data/wispy.db` | SQLite DB: devices, DNS, TLS, mDNS, `flow_sessions`, `plaintext_events` |
 | `data/` | Runtime data (gitignored) |
 
 ## 🧪 Testing
@@ -95,6 +101,7 @@ ComponentName/
 |------|---------|
 | `tests/test_storage.py` | SQLite storage tests |
 | `tests/test_dns_filters.py` | Ad-domain DNS filter tests |
+| `tests/test_extension.py` | Flow sessions, plaintext, correlation, patterns |
 
 ## 🚀 Entry Points
 

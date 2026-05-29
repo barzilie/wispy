@@ -661,3 +661,76 @@ This phase completed the Gemini-based recommender, reduced noise from ad-tech DN
 
 - End-to-end capture behavior and BPF filter: **§“Telemetry Expansion”** (duplicate §4 heading in this document) and `INSTALLATION.md` Step 8.
 - File map: `FILES_OVERVIEW.md`.
+
+---
+
+## 8. TA feedback extension (session recon, plaintext, agentic)
+
+Implemented per [`extension.md`](extension.md) in three tracks.
+
+### 8.1. Track 1 — Session reconnaissance
+
+**Database (`analysis/storage.py`):**
+
+- Table `flow_sessions`: `device_mac`, `proto`, `src_ip`, `dst_ip`, `dst_port`, `dst_host`, `host_source` (`sni` | `dns` | `unknown`), `first_seen`, `last_seen`, `packet_count`, `byte_count`, `service_label`.
+- Indexes: `idx_flows_device_last_seen`, `idx_flows_dst_ip`.
+- `upsert_flow_session()` merges rows for the same 5-tuple within a 60s idle window (accumulates packets/bytes; prefers non-unknown `dst_host` / `host_source`).
+- Pagination via `_TELEMETRY_TABLES`: `get_flow_sessions()`, `count_flow_sessions()`.
+
+**DNS correlation (`analysis/correlation.py`):**
+
+- In-memory `(device_mac, ip) → (domain, timestamp)` cache, 15-minute TTL.
+- Sniffer feeds cache from DNS responses (`QR=1`); flows call `resolve_ip_to_host()` when SNI is absent.
+
+**Sniffer (`core/sniffer.py`):**
+
+- Active flow table with periodic flush to SQLite.
+- TLS SNI preferred for `host_source`; DNS cache as fallback.
+
+**Patterns (`analysis/patterns.py`):**
+
+- `analyze_device_patterns(device_mac)` — heuristics: plaintext leaks, social/work/media tags, background sync.
+
+**API:** `GET /api/flows`, `flows` / `flows_total` on `GET /api/data`.
+
+### 8.2. Track 2 — Plaintext packet hunting
+
+**Database:** table `plaintext_events` — `proto` (`http` | `smtp`), `host_or_server`, `method_or_command`, `body` (full captured plaintext segment), `timestamp`.
+
+**Sniffer:** BPF includes `tcp port 80` and `tcp port 25`; parsers extract HTTP request line / `Host` and SMTP banner/commands; 60s dedup window.
+
+**API:** `GET /api/plaintext`, `plaintext` / `plaintext_total` on `GET /api/data`.
+
+### 8.3. Track 3 — Agentic module
+
+**Package `analysis/agentic/`:**
+
+- `client.py` — Gemini config and model fallbacks.
+- `context.py` — `build_agent_context()` from devices, DNS, flows, plaintext, patterns.
+- `prompts/investigate.py` — session investigation (lab analysis focus).
+- `prompts/recommend.py` — next-step / vulnerability suggestions (educational framing).
+
+**API:** `POST /api/agent/investigate`, `POST /api/agent/recommend`; `/api/recommend` retained as alias.
+
+[`analysis/recommender.py`](analysis/recommender.py) delegates to the agentic package.
+
+### 8.4. React dashboard integration
+
+- [`useWispyData.js`](web/frontend/src/hooks/useWispyData.js) polls `flows` and `plaintext` from `/api/data`.
+- [`FlowAnalytics`](web/frontend/src/components/FlowAnalytics/) — flow table with SNI/DNS resolution badges.
+- [`PlaintextPanel`](web/frontend/src/components/PlaintextPanel/) — cleartext leaks with expandable bodies.
+- [`AgenticPanel`](web/frontend/src/components/AgenticPanel/) — wraps tabbed investigation / recommend UI; [`useRecommendations.js`](web/frontend/src/hooks/useRecommendations.js) calls both agent endpoints.
+
+### 8.5. Real-mode process management
+
+[`web/app.py`](web/app.py): on `POST /api/select-network` (non-mock), disables monitor mode, configures interface, starts `hostapd` / `dnsmasq`, spawns `core/sniffer.py` with project `cwd`. `atexit` and `POST /api/stop-ap` invoke `cleanup_ap_processes()` → `ap_manager.teardown()`.
+
+### 8.6. Verification
+
+```bash
+python -m unittest tests/test_extension.py
+python mock_data.py --reset && python mock_data.py
+python start_wispy.py
+```
+
+Manual: monitoring screen shows flows, plaintext panel, and both agentic tabs on `http://localhost:3001`.

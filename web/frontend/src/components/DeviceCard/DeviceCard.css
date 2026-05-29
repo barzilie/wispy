@@ -17,6 +17,49 @@
   opacity: 0.5;
 }
 
+.device-flow-stats {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: #88ff88;
+}
+
+.device-patterns {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed #004400;
+}
+
+.device-pattern-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.device-pattern-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border: 1px solid #00aa00;
+  color: #00ff00;
+  background: rgba(0, 255, 0, 0.08);
+}
+
+.device-pattern-badge.severity-high {
+  border-color: #ff4444;
+  color: #ff6666;
+  background: rgba(255, 68, 68, 0.12);
+}
+
+.device-pattern-badge.severity-low {
+  border-color: #888800;
+  color: #cccc00;
+}
+
 .device-card:hover {
   border-color: #00ff00;
   box-shadow:

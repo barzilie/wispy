@@ -172,11 +172,13 @@ def _clear_all_data(conn):
         "tls_sni",
         "ja3_fingerprints",
         "mdns_broadcasts",
+        "flow_sessions",
+        "plaintext_events",
     ):
         conn.execute(f"DELETE FROM {table}")
     conn.execute(
         "DELETE FROM sqlite_sequence WHERE name IN "
-        "('dns_requests', 'tls_sni', 'ja3_fingerprints', 'mdns_broadcasts')"
+        "('dns_requests', 'tls_sni', 'ja3_fingerprints', 'mdns_broadcasts', 'flow_sessions', 'plaintext_events')"
     )
 
 
@@ -184,7 +186,7 @@ def generate_mock_data(num_queries_per_device=15):
     """Generate realistic mock data for dashboard testing."""
     init_db()
 
-    print("[*] Generating mock devices, DNS, TLS SNI, JA3, mDNS, DHCP Option 55...\n")
+    print("[*] Generating mock devices, DNS, TLS SNI, JA3, mDNS, DHCP Option 55, flows, plaintext...\n")
 
     now = datetime.utcnow()
     db_path = _db_path()
@@ -238,9 +240,49 @@ def generate_mock_data(num_queries_per_device=15):
                 (device["mac"], svc, ts.isoformat()),
             )
 
-        print(f"    └─ DNS + TLS SNI + JA3 + mDNS rows generated")
+        # Generate mock flow sessions (Track 1)
+        for _ in range(5):
+            ts = first_seen + timedelta(minutes=random.randint(0, 55))
+            proto = "TCP"
+            dst_port = random.choice([443, 80, 22, 8080])
+            service_label = "HTTPS" if dst_port == 443 else ("HTTP" if dst_port == 80 else ("SSH" if dst_port == 22 else "HTTP-ALT"))
+            
+            if dst_port == 443:
+                dst_host = random.choice(sni_hosts)
+                host_source = "sni"
+            elif dst_port == 80:
+                dst_host = random.choice(domains)
+                host_source = "dns"
+            else:
+                dst_host = "unknown"
+                host_source = "unknown"
+                
+            pkts = random.randint(10, 500)
+            bytes_count = pkts * random.randint(64, 1400)
+            
+            conn.execute("""
+                INSERT INTO flow_sessions (device_mac, proto, src_ip, dst_ip, dst_port, dst_host, host_source, first_seen, last_seen, packet_count, byte_count, service_label)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (device["mac"], proto, device["ip"], f"142.250.{random.randint(1,254)}.{random.randint(1,254)}", dst_port, dst_host, host_source, ts.isoformat(), (ts + timedelta(seconds=random.randint(5, 300))).isoformat(), pkts, bytes_count, service_label))
 
-    conn.commit()
+        # Generate mock plaintext events (Track 2)
+        if device["mac"] == "a4:83:e7:12:34:56":  # Johns-iPhone
+            ts = first_seen + timedelta(minutes=10)
+            conn.execute("""
+                INSERT INTO plaintext_events (device_mac, proto, host_or_server, method_or_command, body, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (device["mac"], "http", "detectportal.firefox.com", "GET", "GET /success.txt HTTP/1.1\r\nHost: detectportal.firefox.com\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 8\r\n\r\nsuccess\n", ts.isoformat()))
+            
+        elif device["mac"] == "dc:a6:32:ab:cd:ef":  # Dell Desktop
+            ts = first_seen + timedelta(minutes=15)
+            conn.execute("""
+                INSERT INTO plaintext_events (device_mac, proto, host_or_server, method_or_command, body, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (device["mac"], "smtp", "mail.example.com", "EHLO", "220 mail.example.com ESMTP Postfix\r\nEHLO DESKTOP-8H3KL2\r\n250-mail.example.com\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-ETRN\r\n250-STARTTLS\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n", ts.isoformat()))
+
+        print(f"    └─ DNS + TLS SNI + JA3 + mDNS + flows + plaintext rows generated")
+        conn.commit()
+
     conn.close()
 
     print(f"\n[+] Mock data generated successfully!")

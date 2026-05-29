@@ -48,6 +48,9 @@ const DeviceCard = ({ device, dnsQueries = [], tlsSni = [], ja3Rows = [], mdnsRo
     ? String(device.dhcp_params).trim()
     : '';
 
+  const patterns = device.patterns || [];
+  const flowStats = device.flow_stats;
+
   return (
     <div className="device-card">
       <div className="device-header">
@@ -65,7 +68,29 @@ const DeviceCard = ({ device, dnsQueries = [], tlsSni = [], ja3Rows = [], mdnsRo
             <strong>DHCP opt 55</strong> <span className="device-dhcp55-value">{dhcpLine}</span>
           </p>
         ) : null}
+        {flowStats ? (
+          <p className="device-flow-stats">
+            <strong>Flows</strong>{' '}
+            {flowStats.total_flows} sessions · {flowStats.total_packets} pkts
+          </p>
+        ) : null}
       </div>
+      {patterns.length > 0 && (
+        <div className="device-patterns">
+          <span className="device-dns-preview-label">Usage patterns</span>
+          <ul className="device-pattern-list">
+            {patterns.map((p) => (
+              <li
+                key={p.tag}
+                className={`device-pattern-badge severity-${p.severity || 'info'}`}
+                title={p.desc}
+              >
+                {p.name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="device-dns-preview">
         <span className="device-dns-preview-label">Recent DNS</span>
         {previewDomains.length ? (

@@ -4,7 +4,9 @@ import DeviceList from '../DeviceList/DeviceList';
 import DnsTable from '../DnsTable/DnsTable';
 import DnsAnalytics from '../DnsAnalytics/DnsAnalytics';
 import TelemetryTables from '../TelemetryTables/TelemetryTables';
-import RecommendationsPanel from '../RecommendationsPanel/RecommendationsPanel';
+import FlowAnalytics from '../FlowAnalytics/FlowAnalytics';
+import PlaintextPanel from '../PlaintextPanel/PlaintextPanel';
+import AgenticPanel from '../AgenticPanel/AgenticPanel';
 import useWispyData from '../../hooks/useWispyData';
 import useRecommendations from '../../hooks/useRecommendations';
 
@@ -16,12 +18,23 @@ const MonitoringScreen = ({ selectedNetwork }) => {
     tlsSni,
     ja3Rows,
     mdnsRows,
+    flows,
+    flowsTotal,
+    plaintextEvents,
+    plaintextTotal,
     error,
     loadMoreDns,
     loadingMoreDns,
     hasMoreDns,
   } = useWispyData(2000);
-  const { recommendations, loading, error: recError, getRecommendations } = useRecommendations();
+  const {
+    investigation,
+    recommendations,
+    loading,
+    error: recError,
+    getInvestigation,
+    getRecommendations,
+  } = useRecommendations();
 
   return (
     <div className="monitoring-screen">
@@ -51,6 +64,8 @@ const MonitoringScreen = ({ selectedNetwork }) => {
           mdnsRows={mdnsRows}
         />
         <TelemetryTables tlsSni={tlsSni} ja3={ja3Rows} mdns={mdnsRows} />
+        <FlowAnalytics flows={flows} flowsTotal={flowsTotal} />
+        <PlaintextPanel plaintext={plaintextEvents} plaintextTotal={plaintextTotal} />
         <DnsAnalytics dnsQueries={dnsQueries} />
         <DnsTable
           dnsQueries={dnsQueries}
@@ -59,10 +74,12 @@ const MonitoringScreen = ({ selectedNetwork }) => {
           hasMoreDns={hasMoreDns}
           loadingMoreDns={loadingMoreDns}
         />
-        <RecommendationsPanel
+        <AgenticPanel
+          investigation={investigation}
           recommendations={recommendations}
           loading={loading}
           error={recError}
+          onGetInvestigation={getInvestigation}
           onGetRecommendations={getRecommendations}
         />
       </div>
