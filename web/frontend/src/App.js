@@ -11,10 +11,19 @@ function App() {
     networks,
     selectedNetwork,
     loading,
+    restoring,
     error,
     startScan,
     selectNetwork,
   } = useAppFlow();
+
+  if (restoring) {
+    return (
+      <div className="App app-restoring">
+        <p>Restoring session…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="App">

@@ -1,6 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const PAGE_SIZE = 200;
+const DATA_URL = '/api/data?include_dns=0';
+const POLL_DATA_URL = '/api/data?include_dns=0&include_patterns=0';
+
+const applyTelemetry = (dataJson, setters) => {
+  setters.setDevices(dataJson.devices || []);
+  setters.setTlsSni(dataJson.tls_sni || []);
+  setters.setJa3Rows(dataJson.ja3 || []);
+  setters.setMdnsRows(dataJson.mdns || []);
+  setters.setFlows(dataJson.flows || []);
+  setters.setFlowsTotal(dataJson.flows_total ?? 0);
+  setters.setPlaintextEvents(dataJson.plaintext || []);
+  setters.setPlaintextTotal(dataJson.plaintext_total ?? 0);
+};
 
 /**
  * Live devices + DNS with incremental updates and cursor pagination for infinite scroll.
@@ -21,43 +34,100 @@ const useWispyData = (refreshInterval = 2000) => {
   const [olderExhausted, setOlderExhausted] = useState(false);
   const maxIdRef = useRef(null);
 
+  const telemetrySetters = {
+    setDevices,
+    setTlsSni,
+    setJa3Rows,
+    setMdnsRows,
+    setFlows,
+    setFlowsTotal,
+    setPlaintextEvents,
+    setPlaintextTotal,
+  };
+
   useEffect(() => {
     let cancelled = false;
 
+    const syncDnsRows = (rows, total) => {
+      setDnsQueries(rows);
+      setDnsTotal(total);
+      setOlderExhausted(total <= rows.length);
+      if (rows.length) {
+        maxIdRef.current = Math.max(...rows.map((r) => r.id));
+      } else {
+        maxIdRef.current = null;
+      }
+    };
+
+    const refreshDns = async () => {
+      const mid = maxIdRef.current;
+      if (mid == null) {
+        const dnsRes = await fetch(`/api/dns?limit=${PAGE_SIZE}`);
+        if (!dnsRes.ok || cancelled) return false;
+        const dj = await dnsRes.json();
+        const rows = dj.dns || [];
+        if (cancelled || !rows.length) return false;
+        syncDnsRows(rows, dj.total ?? 0);
+        return true;
+      }
+
+      const incRes = await fetch(`/api/dns?after_id=${mid}&limit=500`);
+      if (!incRes.ok || cancelled) return false;
+      const incJson = await incRes.json();
+      const fresh = incJson.dns || [];
+      if (!fresh.length) return false;
+
+      setDnsQueries((prev) => {
+        const byId = new Map(prev.map((r) => [r.id, r]));
+        fresh.forEach((r) => byId.set(r.id, r));
+        const next = Array.from(byId.values()).sort((a, b) => b.id - a.id);
+        maxIdRef.current = next.length ? next[0].id : mid;
+        return next;
+      });
+      if (incJson.total != null) {
+        setDnsTotal(incJson.total);
+      }
+      return true;
+    };
+
     const loadInitial = async () => {
+      let dnsOk = false;
+      let dataOk = false;
+
       try {
-        const [dnsRes, dataRes] = await Promise.all([
-          fetch(`/api/dns?limit=${PAGE_SIZE}`),
-          fetch('/api/data?include_dns=0'),
-        ]);
-        if (!dnsRes.ok || !dataRes.ok) {
-          throw new Error('Failed to fetch monitoring data');
+        const dnsRes = await fetch(`/api/dns?limit=${PAGE_SIZE}`);
+        if (dnsRes.ok) {
+          const dnsJson = await dnsRes.json();
+          if (!cancelled) {
+            syncDnsRows(dnsJson.dns || [], dnsJson.total ?? 0);
+            dnsOk = true;
+          }
         }
-        const dnsJson = await dnsRes.json();
-        const dataJson = await dataRes.json();
-        if (cancelled) return;
-        const rows = dnsJson.dns || [];
-        setDnsQueries(rows);
-        setDnsTotal(dnsJson.total ?? 0);
-        setDevices(dataJson.devices || []);
-        setTlsSni(dataJson.tls_sni || []);
-        setJa3Rows(dataJson.ja3 || []);
-        setMdnsRows(dataJson.mdns || []);
-        setFlows(dataJson.flows || []);
-        setFlowsTotal(dataJson.flows_total ?? 0);
-        setPlaintextEvents(dataJson.plaintext || []);
-        setPlaintextTotal(dataJson.plaintext_total ?? 0);
-        setOlderExhausted((dnsJson.total ?? 0) <= rows.length);
-        if (rows.length) {
-          maxIdRef.current = Math.max(...rows.map((r) => r.id));
-        } else {
-          maxIdRef.current = null;
-        }
-        setError(null);
       } catch (err) {
-        if (!cancelled) {
-          console.error('Error fetching data:', err);
-          setError(err.message);
+        console.error('Error fetching DNS:', err);
+      }
+
+      try {
+        const dataRes = await fetch(DATA_URL);
+        if (dataRes.ok) {
+          const dataJson = await dataRes.json();
+          if (!cancelled) {
+            applyTelemetry(dataJson, telemetrySetters);
+            if (dataJson.dns_total != null) {
+              setDnsTotal(dataJson.dns_total);
+            }
+            dataOk = true;
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching telemetry:', err);
+      }
+
+      if (!cancelled) {
+        if (dnsOk || dataOk) {
+          setError(null);
+        } else {
+          setError('Failed to fetch monitoring data');
         }
       }
     };
@@ -65,54 +135,32 @@ const useWispyData = (refreshInterval = 2000) => {
     loadInitial();
 
     const interval = setInterval(async () => {
+      let telemetryOk = false;
+
       try {
-        const dataRes = await fetch('/api/data?include_dns=0');
-        if (!dataRes.ok) throw new Error('Failed to fetch devices');
-        const dataJson = await dataRes.json();
-        if (cancelled) return;
-        setDevices(dataJson.devices || []);
-        setDnsTotal(dataJson.dns_total ?? 0);
-        setTlsSni(dataJson.tls_sni || []);
-        setJa3Rows(dataJson.ja3 || []);
-        setMdnsRows(dataJson.mdns || []);
-        setFlows(dataJson.flows || []);
-        setFlowsTotal(dataJson.flows_total ?? 0);
-        setPlaintextEvents(dataJson.plaintext || []);
-        setPlaintextTotal(dataJson.plaintext_total ?? 0);
-
-        const mid = maxIdRef.current;
-        if (mid == null) {
-          if ((dataJson.dns_total ?? 0) > 0) {
-            const dnsRes = await fetch(`/api/dns?limit=${PAGE_SIZE}`);
-            if (!dnsRes.ok || cancelled) return;
-            const dj = await dnsRes.json();
-            const rows = dj.dns || [];
-            if (cancelled || !rows.length) return;
-            setDnsQueries(rows);
-            setDnsTotal(dj.total ?? 0);
-            maxIdRef.current = Math.max(...rows.map((r) => r.id));
-            setOlderExhausted((dj.total ?? 0) <= rows.length);
+        const dataRes = await fetch(POLL_DATA_URL);
+        if (dataRes.ok) {
+          const dataJson = await dataRes.json();
+          if (!cancelled) {
+            applyTelemetry(dataJson, telemetrySetters);
+            setDnsTotal(dataJson.dns_total ?? 0);
+            telemetryOk = true;
           }
-          return;
         }
+      } catch (err) {
+        console.error('Error polling telemetry:', err);
+      }
 
-        const incRes = await fetch(`/api/dns?after_id=${mid}&limit=500`);
-        if (!incRes.ok) return;
-        const incJson = await incRes.json();
-        const fresh = incJson.dns || [];
-        if (cancelled || !fresh.length) return;
-
-        setDnsQueries((prev) => {
-          const byId = new Map(prev.map((r) => [r.id, r]));
-          fresh.forEach((r) => byId.set(r.id, r));
-          const next = Array.from(byId.values()).sort((a, b) => b.id - a.id);
-          maxIdRef.current = next.length ? next[0].id : mid;
-          return next;
-        });
-        setError(null);
+      try {
+        const dnsOk = await refreshDns();
+        if (!cancelled && (telemetryOk || dnsOk)) {
+          setError(null);
+        } else if (!cancelled && !telemetryOk) {
+          setError('Failed to refresh monitoring data');
+        }
       } catch (err) {
         if (!cancelled) {
-          console.error('Error polling:', err);
+          console.error('Error polling DNS:', err);
           setError(err.message);
         }
       }
