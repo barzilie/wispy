@@ -40,7 +40,7 @@ _last_sni_seen = {}
 _last_ja3_seen = {}
 _last_plaintext_seen = {}
 
-# Flow session tracking
+# in-memory flow tracking
 _active_flows = {}
 _last_flow_flush = time.time()
 FLOW_FLUSH_INTERVAL_SEC = 5
@@ -91,7 +91,7 @@ def _handle_dns(packet):
         return
     dns = packet[DNS]
 
-    if dns.qr == 0:  # Query
+    if dns.qr == 0:  # query
         if not packet.haslayer(DNSQR):
             return
         mac = packet[Ether].src if packet.haslayer(Ether) else "00:00:00:00:00:00"
@@ -104,16 +104,16 @@ def _handle_dns(packet):
         if is_ad_tracking_domain(domain):
             return
 
-        fp = fingerprint(mac, ttl)
-        upsert_device(mac, ip=ip, vendor=fp["vendor"], os_guess=fp["os_guess"])
+        dev_fp = fingerprint(mac, ttl)
+        upsert_device(mac, ip=ip, vendor=dev_fp["vendor"], os_guess=dev_fp["os_guess"])
         insert_dns(mac, domain)
-        print(f"[DNS]  {mac} → {domain}")
+        print(f"[DNS] {mac} -> {domain}")
         
-    elif dns.qr == 1:  # Response
+    elif dns.qr == 1:  # answer
         mac = packet[Ether].dst if packet.haslayer(Ether) else None
         if not mac:
             return
-        # Parse answers
+        # pull A/AAAA records out of the response
         i = 1
         while True:
             rr = packet.getlayer(DNSRR, i)
@@ -157,12 +157,12 @@ def _handle_dhcp(packet):
         ip = None
 
     upsert_device(mac, ip=ip, hostname=hostname, dhcp_params=dhcp_params)
-    print(f"[DHCP] {mac} → hostname: {hostname}, option55: {dhcp_params}")
+    print(f"[DHCP] {mac} -> hostname={hostname} opt55={dhcp_params}")
 
 
 def _extract_mdns_name(packet):
     dns = packet[DNS]
-    # Queries
+    # query section
     if dns.qdcount and hasattr(dns, "qd") and dns.qd is not None:
         qd = dns.qd
         while isinstance(qd, DNSQR):
@@ -173,7 +173,7 @@ def _extract_mdns_name(packet):
             if qd is None:
                 break
 
-    # Resource records (responses/announcements)
+    # answer/announcement records
     rr = getattr(dns, "an", None)
     if rr is not None:
         name = _normalize_name(getattr(rr, "rrname", None))
@@ -192,7 +192,7 @@ def _handle_mdns(packet):
     name = _extract_mdns_name(packet)
     if not name:
         return
-    # Keep local service broadcasts and reduce mDNS noise.
+    # only care about .local service names, cuts down noise
     if not name.endswith(".local"):
         return
     if "_" not in name:
@@ -202,7 +202,7 @@ def _handle_mdns(packet):
     if not _should_emit(_last_mdns_seen, (mac, name), MDNS_DEDUP_WINDOW_SEC):
         return
     insert_mdns(mac, name)
-    print(f"[mDNS] {mac} → {name}")
+    print(f"[mDNS] {mac} -> {name}")
 
 
 def _ja3_from_client_hello(client_hello):
@@ -275,9 +275,9 @@ def _handle_tls(packet):
         if sni:
             if _should_emit(_last_sni_seen, (mac, sni), TLS_SNI_DEDUP_WINDOW_SEC):
                 insert_tls_sni(mac, sni)
-                print(f"[TLS]  {mac} → SNI: {sni}")
+                print(f"[TLS] {mac} -> sni={sni}")
             
-            # Tie SNI to active TCP/443 flow
+            # attach sni to the tcp/443 flow if we have one
             if src_ip and dst_ip:
                 flow_key = (mac, "TCP", src_ip, dst_ip, 443)
                 if flow_key in _active_flows:
@@ -288,7 +288,7 @@ def _handle_tls(packet):
         if ja3_hash:
             if _should_emit(_last_ja3_seen, (mac, ja3_hash), JA3_DEDUP_WINDOW_SEC):
                 insert_ja3(mac, ja3_hash)
-                print(f"[JA3]  {mac} → {ja3_hash}")
+                print(f"[JA3] {mac} -> {ja3_hash}")
 
 
 def _is_private_ip(ip):
@@ -369,11 +369,12 @@ def _track_packet_flow(packet):
     now_epoch = time.time()
     now_iso = datetime.utcnow().isoformat()
     
-    if flow_key not in _active_flows:
+    flow_buf = _active_flows
+    if flow_key not in flow_buf:
         dst_host, host_source = resolve_ip_to_host(client_mac, server_ip)
-        service_label = _get_service_label(server_port)
+        svc_name = _get_service_label(server_port)
         
-        _active_flows[flow_key] = {
+        flow_buf[flow_key] = {
             'client_mac': client_mac,
             'proto': proto,
             'client_ip': client_ip,
@@ -381,7 +382,7 @@ def _track_packet_flow(packet):
             'server_port': server_port,
             'dst_host': dst_host or "unknown",
             'host_source': host_source,
-            'service_label': service_label,
+            'service_label': svc_name,
             'first_seen': now_iso,
             'last_seen': now_iso,
             'last_seen_epoch': now_epoch,
@@ -389,7 +390,7 @@ def _track_packet_flow(packet):
             'new_bytes': 0
         }
         
-    flow = _active_flows[flow_key]
+    flow = flow_buf[flow_key]
     flow['last_seen'] = now_iso
     flow['last_seen_epoch'] = now_epoch
     flow['new_packets'] += 1
@@ -502,7 +503,7 @@ def _handle_plaintext(packet):
         return
         
     payload = bytes(packet[Raw])
-    # Skip if it looks like TLS/SSL handshake
+    # dont mistake tls handshakes for plaintext
     if len(payload) > 5 and payload[0] == 0x16 and payload[1] == 0x03:
         return
         
@@ -511,7 +512,7 @@ def _handle_plaintext(packet):
     src_mac = packet[Ether].src if packet.haslayer(Ether) else None
     dst_mac = packet[Ether].dst if packet.haslayer(Ether) else None
     
-    # Identify client MAC using private IP check
+    # figure out client mac from who has the private ip
     if _is_private_ip(src_ip):
         client_mac = src_mac
     elif _is_private_ip(dst_ip):
@@ -523,22 +524,22 @@ def _handle_plaintext(packet):
         return
         
     if sport == 80 or dport == 80:
-        res = _parse_http_payload(payload)
-        if res:
-            key = (client_mac, "http", res['host'], res['method'], res['summary'])
+        parsed = _parse_http_payload(payload)
+        if parsed:
+            key = (client_mac, "http", parsed['host'], parsed['method'], parsed['summary'])
             if _should_emit(_last_plaintext_seen, key, HTTP_SMTP_DEDUP_WINDOW_SEC):
-                body_text = payload.decode(errors='ignore')
-                insert_plaintext(client_mac, "http", res['host'], res['method'], body_text)
-                print(f"[HTTP] {client_mac} → {res['host']} ({res['method']})")
+                body_txt = payload.decode(errors='ignore')
+                insert_plaintext(client_mac, "http", parsed['host'], parsed['method'], body_txt)
+                print(f"[HTTP] {client_mac} -> {parsed['host']} ({parsed['method']})")
                 
     elif sport == 25 or dport == 25:
-        res = _parse_smtp_payload(payload)
-        if res:
-            key = (client_mac, "smtp", res['server'], res['command'], res['summary'])
+        parsed = _parse_smtp_payload(payload)
+        if parsed:
+            key = (client_mac, "smtp", parsed['server'], parsed['command'], parsed['summary'])
             if _should_emit(_last_plaintext_seen, key, HTTP_SMTP_DEDUP_WINDOW_SEC):
-                body_text = payload.decode(errors='ignore')
-                insert_plaintext(client_mac, "smtp", res['server'], res['command'], body_text)
-                print(f"[SMTP] {client_mac} → {res['command']}")
+                body_txt = payload.decode(errors='ignore')
+                insert_plaintext(client_mac, "smtp", parsed['server'], parsed['command'], body_txt)
+                print(f"[SMTP] {client_mac} -> {parsed['command']}")
 
 
 def process_packet(packet):
@@ -551,19 +552,19 @@ def process_packet(packet):
         _handle_tls(packet)
         _handle_plaintext(packet)
         
-    # Track IP flow sessions
+    # flow stats
     if packet.haslayer(IP):
         _track_packet_flow(packet)
         
-    # Flush flow updates periodically
+    # flush to sqlite every few sec
     if time.time() - _last_flow_flush > FLOW_FLUSH_INTERVAL_SEC:
         _flush_flows_to_db()
 
 
 def start():
     init_db()
-    print(f"[*] Sniffing on interface: {INTERFACE}")
-    print("[*] Listening for DNS, mDNS, DHCP, TLS, HTTP, SMTP... Press Ctrl+C to stop.\n")
+    print(f"[*] sniffing on {INTERFACE}")
+    print("[*] watching dns/mdns/dhcp/tls/http/smtp - ctrl+c to quit\n")
     sniff(
         iface=INTERFACE,
         filter="udp port 53 or udp port 5353 or udp port 67 or udp port 68 or tcp port 443 or tcp port 80 or tcp port 25",

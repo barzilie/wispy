@@ -12,89 +12,85 @@ import signal
 
 def check_dependencies():
     """Check if required dependencies are installed"""
-    # Check virtual environment
+    # venv check
     if not os.path.exists('.venv'):
-        print("❌ Error: Virtual environment not found")
-        print("Run: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt")
+        print("error: no venv found")
+        print("run: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt")
         sys.exit(1)
 
-    # Check npm
+    # need npm for the react app
     try:
         subprocess.run(['npm', '--version'], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("❌ Error: npm not found. Install Node.js first.")
+        print("error: npm not found, install node.js first")
         sys.exit(1)
 
-    # Check React dependencies
+    # install frontend deps if missing
     if not os.path.exists('web/frontend/node_modules'):
-        print("⚠️  React dependencies not found. Installing...")
+        print("react deps missing, installing...")
         subprocess.run(['npm', 'install'], cwd='web/frontend', check=True)
 
 def main():
     print("=" * 60)
-    print("🕵️  Starting WiSpy Network Surveillance System")
+    print("starting wispy")
     print("=" * 60)
 
-    # Change to project root
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(project_root)
+    # cd to repo root
+    proj_root = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(proj_root)
 
-    # Check dependencies
     check_dependencies()
 
-    processes = []
+    procs = []
 
     try:
-        # Start Flask backend
-        print("\n📡 Starting Flask backend...")
-        python_exe = os.path.join('.venv', 'bin', 'python')
-        flask_process = subprocess.Popen(
-            [python_exe, 'web/app.py'],
+        # flask first
+        print("\nstarting flask backend...")
+        py_bin = os.path.join('.venv', 'bin', 'python')
+        flask_proc = subprocess.Popen(
+            [py_bin, 'web/app.py'],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT
         )
-        processes.append(flask_process)
+        procs.append(flask_proc)
 
-        # Wait for Flask to start
-        print("⏳ Waiting for Flask to start...")
+        print("waiting a few sec for flask...")
         time.sleep(3)
 
-        # Start React frontend
-        print("⚛️  Starting React frontend...")
-        react_process = subprocess.Popen(
+        # then react
+        print("starting react frontend...")
+        react_proc = subprocess.Popen(
             ['npm', 'start'],
             cwd='web/frontend',
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT
         )
-        processes.append(react_process)
+        procs.append(react_proc)
 
         print("\n" + "=" * 60)
-        print("✅ WiSpy Started!")
+        print("wispy is up")
         print("=" * 60)
-        print("Flask Backend:  http://localhost:5000")
-        print("React Frontend: http://localhost:3001")
-        print("\nPress Ctrl+C to stop both servers")
+        print("flask:  http://localhost:5000")
+        print("react:  http://localhost:3001")
+        print("\nctrl+c to stop both")
         print("=" * 60 + "\n")
 
-        # Wait for both processes
-        for process in processes:
-            process.wait()
+        for p in procs:
+            p.wait()
 
     except KeyboardInterrupt:
-        print("\n\n⏹️  Stopping WiSpy...")
-        for process in processes:
-            process.terminate()
+        print("\n\nstopping wispy...")
+        for p in procs:
+            p.terminate()
 
-        # Wait for graceful shutdown
         time.sleep(2)
 
-        # Force kill if still running
-        for process in processes:
-            if process.poll() is None:
-                process.kill()
+        # kill if they didnt exit cleanly
+        for p in procs:
+            if p.poll() is None:
+                p.kill()
 
-        print("✅ WiSpy stopped.")
+        print("done, wispy stopped")
         sys.exit(0)
 
 if __name__ == '__main__':

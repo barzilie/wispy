@@ -27,19 +27,19 @@ import atexit
 ap_processes = []
 
 
-# Import configuration
+# config imports
 from config import MOCK_MODE, FLASK_HOST, FLASK_PORT, WIFI_INTERFACE, print_startup_info, get_mode_info
 
-# Import mock data or real scanner based on mode
+# mock vs real scanner
 if MOCK_MODE:
     from mock.mock_networks import get_mock_networks
 else:
     from core.scanner import enable_monitor_mode, scan_networks
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
-CORS(app)  # Enable CORS for all routes
+CORS(app)  # cors for react dev server
 
-# Store scan results and process state
+# shared scan/ap state
 scan_state = {
     'scanning': False,
     'networks': [],
@@ -72,54 +72,54 @@ def api_data():
     include_dns = request.args.get('include_dns', '1').lower() not in ('0', 'false', 'no')
     dns_limit = _int_arg('dns_limit', 200, min_v=1, max_v=2000)
     dns_offset = _int_arg('dns_offset', 0, min_v=0, max_v=10_000_000)
-    tel_limit = _int_arg('telemetry_limit', 200, min_v=1, max_v=2000)
+    tel_lim = _int_arg('telemetry_limit', 200, min_v=1, max_v=2000)
     include_telemetry = request.args.get('include_telemetry', '1').lower() not in ('0', 'false', 'no')
 
-    payload = {
+    resp_data = {
         'devices': get_devices(),
         'dns_total': count_dns_requests(),
     }
     if include_dns:
-        payload['dns'] = get_dns_requests(limit=dns_limit, offset=dns_offset)
+        resp_data['dns'] = get_dns_requests(limit=dns_limit, offset=dns_offset)
     else:
-        payload['dns'] = []
+        resp_data['dns'] = []
 
     if include_telemetry:
-        payload['tls_sni'] = get_tls_sni(limit=tel_limit, offset=0)
-        payload['tls_sni_total'] = count_tls_sni()
-        payload['ja3'] = get_ja3(limit=tel_limit, offset=0)
-        payload['ja3_total'] = count_ja3()
-        payload['mdns'] = get_mdns(limit=tel_limit, offset=0)
-        payload['mdns_total'] = count_mdns()
-        payload['flows'] = get_flow_sessions(limit=tel_limit, offset=0)
-        payload['flows_total'] = count_flow_sessions()
-        payload['plaintext'] = get_plaintext_events(limit=tel_limit, offset=0)
-        payload['plaintext_total'] = count_plaintext_events()
+        resp_data['tls_sni'] = get_tls_sni(limit=tel_lim, offset=0)
+        resp_data['tls_sni_total'] = count_tls_sni()
+        resp_data['ja3'] = get_ja3(limit=tel_lim, offset=0)
+        resp_data['ja3_total'] = count_ja3()
+        resp_data['mdns'] = get_mdns(limit=tel_lim, offset=0)
+        resp_data['mdns_total'] = count_mdns()
+        resp_data['flows'] = get_flow_sessions(limit=tel_lim, offset=0)
+        resp_data['flows_total'] = count_flow_sessions()
+        resp_data['plaintext'] = get_plaintext_events(limit=tel_lim, offset=0)
+        resp_data['plaintext_total'] = count_plaintext_events()
     else:
-        payload['tls_sni'] = []
-        payload['tls_sni_total'] = 0
-        payload['ja3'] = []
-        payload['ja3_total'] = 0
-        payload['mdns'] = []
-        payload['mdns_total'] = 0
-        payload['flows'] = []
-        payload['flows_total'] = 0
-        payload['plaintext'] = []
-        payload['plaintext_total'] = 0
+        resp_data['tls_sni'] = []
+        resp_data['tls_sni_total'] = 0
+        resp_data['ja3'] = []
+        resp_data['ja3_total'] = 0
+        resp_data['mdns'] = []
+        resp_data['mdns_total'] = 0
+        resp_data['flows'] = []
+        resp_data['flows_total'] = 0
+        resp_data['plaintext'] = []
+        resp_data['plaintext_total'] = 0
 
     include_patterns = request.args.get('include_patterns', '1').lower() not in ('0', 'false', 'no')
     if include_patterns:
         from analysis.patterns import analyze_device_patterns
-        for dev in payload['devices']:
-            patterns_info = analyze_device_patterns(dev['mac'], use_cache=True)
-            dev['patterns'] = patterns_info['detected_patterns']
+        for dev in resp_data['devices']:
+            pat_info = analyze_device_patterns(dev['mac'], use_cache=True)
+            dev['patterns'] = pat_info['detected_patterns']
             dev['flow_stats'] = {
-                'total_flows': patterns_info['total_flows'],
-                'total_packets': patterns_info['total_packets'],
-                'total_bytes': patterns_info['total_bytes'],
+                'total_flows': pat_info['total_flows'],
+                'total_packets': pat_info['total_packets'],
+                'total_bytes': pat_info['total_bytes'],
             }
 
-    return jsonify(payload)
+    return jsonify(resp_data)
 
 
 @app.route('/api/dns')
@@ -197,18 +197,18 @@ def start_scan():
 
     try:
         if MOCK_MODE:
-            # Use mock networks for development
-            print("[MOCK MODE] Using mock network data")
+            # dev mode fake networks
+            print("[mock] using fake wifi list")
             networks = get_mock_networks()
         else:
-            # Real scanning on Kali Linux
-            print(f"[REAL MODE] Scanning on interface {WIFI_INTERFACE}")
-            mon_iface = enable_monitor_mode(WIFI_INTERFACE)
-            networks = scan_networks(mon_iface, duration=15)
-            # Convert real scan format to match mock format
+            # real scan on kali
+            print(f"[real] scanning {WIFI_INTERFACE}...")
+            mon_if = enable_monitor_mode(WIFI_INTERFACE)
+            networks = scan_networks(mon_if, duration=15)
+            # add signal field so frontend doesnt complain
             for net in networks:
                 if 'signal' not in net:
-                    net['signal'] = -60  # Default signal if not provided
+                    net['signal'] = -60  # made up rssi
 
         scan_state['networks'] = networks
         scan_state['scanning'] = False
@@ -221,7 +221,7 @@ def start_scan():
 
     except Exception as e:
         scan_state['scanning'] = False
-        print(f"[ERROR] Scan failed: {e}")
+        print(f"[error] scan blew up: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e),
@@ -313,7 +313,7 @@ def api_plaintext():
 def cleanup_ap_processes():
     global ap_processes
     if ap_processes:
-        print("[*] Terminating rogue AP background processes...")
+        print("[*] killing rogue ap processes...")
         from core.ap_manager import teardown
         outbound_iface = os.getenv("OUTBOUND_INTERFACE", "eth0")
         teardown(ap_processes, interface=WIFI_INTERFACE, outbound_interface=outbound_iface)
@@ -360,45 +360,41 @@ def select_network():
     data = request.json
     ssid = data.get('ssid')
 
-    # Find the network
-    selected = next((n for n in scan_state['networks'] if n['ssid'] == ssid), None)
+    # find ssid in last scan results
+    picked = next((n for n in scan_state['networks'] if n['ssid'] == ssid), None)
 
-    if not selected:
+    if not picked:
         return jsonify({'status': 'error', 'message': 'Network not found'}), 404
 
-    scan_state['selected_network'] = selected
+    scan_state['selected_network'] = picked
     scan_state['monitoring'] = True
-    response_extra = {}
+    extra = {}
 
-    # On Kali Linux (real mode), start hostapd, dnsmasq, and the packet sniffer
+    # on real hardware spin up hostapd dnsmasq sniffer
     if not MOCK_MODE:
         try:
             from core.scanner import disable_monitor_mode
             from core.ap_manager import configure_interface, write_hostapd_conf, write_dnsmasq_conf, enable_routing, start_hostapd, start_dnsmasq
             
-            # Disable monitor mode on scan interface if it was active
-            mon_iface = WIFI_INTERFACE + "mon"
+            # turn off monitor mode if we left it on
+            mon_if = WIFI_INTERFACE + "mon"
             try:
-                disable_monitor_mode(mon_iface)
+                disable_monitor_mode(mon_if)
             except Exception as e:
-                print(f"[AP Deploy] Warning when disabling monitor mode: {e}")
+                print(f"[ap] monitor mode disable warning: {e}")
 
-            # Configure interface IP
-            print(f"[AP Deploy] Configuring interface {WIFI_INTERFACE}...")
+            print(f"[ap] setting up {WIFI_INTERFACE}...")
             configure_interface(WIFI_INTERFACE)
 
-            # Write daemon config files
-            print(f"[AP Deploy] Writing daemon configurations...")
-            write_hostapd_conf(selected['ssid'], selected.get('channel', 6), WIFI_INTERFACE)
+            print("[ap] writing hostapd + dnsmasq configs")
+            write_hostapd_conf(picked['ssid'], picked.get('channel', 6), WIFI_INTERFACE)
             write_dnsmasq_conf(WIFI_INTERFACE)
 
-            # Enable IP forwarding and NAT
-            outbound_iface = os.getenv("OUTBOUND_INTERFACE", "eth0")
-            print(f"[AP Deploy] Enabling IP routing/NAT on {outbound_iface}...")
-            enable_routing(outbound_iface)
+            wan_if = os.getenv("OUTBOUND_INTERFACE", "eth0")
+            print(f"[ap] nat on {wan_if}...")
+            enable_routing(wan_if)
 
-            # Spawn daemons
-            print(f"[AP Deploy] Starting hostapd and dnsmasq...")
+            print("[ap] starting hostapd and dnsmasq")
             p_hostapd = start_hostapd()
             _assert_process_running(p_hostapd, "hostapd")
             ap_processes.append(p_hostapd)
@@ -407,30 +403,30 @@ def select_network():
             _assert_process_running(p_dnsmasq, "dnsmasq")
             ap_processes.append(p_dnsmasq)
 
-            print(f"[AP Deploy] Spawning packet sniffer...")
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            sniffer_path = os.path.join(project_root, 'core', 'sniffer.py')
-            p_sniffer, sniffer_used_sudo = _start_sniffer_process(project_root, sniffer_path)
-            ap_processes.append(p_sniffer)
+            print("[ap] starting sniffer subprocess")
+            proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            sniffer_script = os.path.join(proj_root, 'core', 'sniffer.py')
+            p_sniff, used_sudo = _start_sniffer_process(proj_root, sniffer_script)
+            ap_processes.append(p_sniff)
 
-            print(f"[AP Deploy] Rogue twin AP is live!")
-            if not sniffer_used_sudo:
-                response_extra['sniffer_warning'] = (
+            print("[ap] rogue ap should be up now")
+            if not used_sudo:
+                extra['sniffer_warning'] = (
                     "Sniffer started without root; capture may be empty. "
                     "Set WISPY_SNIFFER_SUDO=true in .env (with passwordless sudo for the sniffer), "
                     "or run: sudo .venv/bin/python core/sniffer.py"
                 )
 
         except Exception as e:
-            print(f"[AP Deploy] Deployment failed: {e}")
+            print(f"[ap] deploy failed: {e}")
             cleanup_ap_processes()
             scan_state['monitoring'] = False
             scan_state['selected_network'] = None
             return jsonify({'status': 'error', 'message': f'Failed to deploy AP: {e}'}), 500
 
-    body = {'status': 'success', 'network': selected}
+    body = {'status': 'success', 'network': picked}
     if not MOCK_MODE:
-        body.update(response_extra)
+        body.update(extra)
     return jsonify(body)
 
 

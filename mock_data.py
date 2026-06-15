@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
-Mock data generator for WiSpy dashboard development on macOS.
-Populates the SQLite database with realistic fake devices, DNS, TLS SNI, JA3, mDNS, and DHCP Option 55.
-
-Usage:
-    python mock_data.py          # Generate fresh mock data
-    python mock_data.py --more   # Add more queries to existing data
-    python mock_data.py --reset  # Clear all data first
+fills sqlite with fake devices/dns for testing on mac
+usage:
+    python mock_data.py          # fresh data
+    python mock_data.py --more   # more dns rows
+    python mock_data.py --reset  # wipe first
 """
 
 import os
@@ -17,7 +15,7 @@ from datetime import datetime, timedelta
 
 from analysis.storage import init_db, upsert_device, insert_dns
 
-# Realistic device profiles — domains for DNS; sni/mdns/ja3/dhcp tailored per device class
+# fake device profiles - tweak domains/sni per device type
 MOCK_DEVICES = [
     {
         "mac": "a4:83:e7:12:34:56",
@@ -186,11 +184,11 @@ def generate_mock_data(num_queries_per_device=15):
     """Generate realistic mock data for dashboard testing."""
     init_db()
 
-    print("[*] Generating mock devices, DNS, TLS SNI, JA3, mDNS, DHCP Option 55, flows, plaintext...\n")
+    print("[*] generating mock stuff (devices dns tls ja3 mdns flows etc)\n")
 
     now = datetime.utcnow()
-    db_path = _db_path()
-    conn = sqlite3.connect(db_path)
+    db_file = _db_path()
+    conn = sqlite3.connect(db_file)
 
     for device in MOCK_DEVICES:
         first_seen = now - timedelta(minutes=random.randint(5, 60))
@@ -203,25 +201,25 @@ def generate_mock_data(num_queries_per_device=15):
             dhcp_params=device.get("dhcp_params"),
         )
 
-        print(f"[+] Device: {device['hostname']} ({device['mac']}) - {device['vendor']} {device['os_guess']}")
+        print(f"[+] {device['hostname']} ({device['mac']}) - {device['vendor']} / {device['os_guess']}")
 
-        domains = device["domains"]
-        sni_hosts = device["sni_hosts"]
+        dom_list = device["domains"]
+        sni_list = device["sni_hosts"]
         ja3_list = device["ja3_samples"]
         mdns_list = device["mdns_services"]
 
         for i in range(num_queries_per_device):
-            domain = random.choice(domains)
+            domain = random.choice(dom_list)
             query_time = first_seen + timedelta(minutes=random.randint(0, 55))
             conn.execute(
                 "INSERT INTO dns_requests (device_mac, domain, timestamp) VALUES (?, ?, ?)",
                 (device["mac"], domain, query_time.isoformat()),
             )
 
-        # Fewer TLS / JA3 rows than DNS (still visible in UI)
+        # less tls/ja3 than dns but enough for the ui
         for _ in range(max(3, num_queries_per_device // 3)):
             ts = first_seen + timedelta(minutes=random.randint(0, 55))
-            sni = random.choice(sni_hosts)
+            sni = random.choice(sni_list)
             conn.execute(
                 "INSERT INTO tls_sni (device_mac, sni, timestamp) VALUES (?, ?, ?)",
                 (device["mac"], sni, ts.isoformat()),
@@ -240,81 +238,81 @@ def generate_mock_data(num_queries_per_device=15):
                 (device["mac"], svc, ts.isoformat()),
             )
 
-        # Generate mock flow sessions (Track 1)
+        # mock flow sessions
         for _ in range(5):
             ts = first_seen + timedelta(minutes=random.randint(0, 55))
             proto = "TCP"
             dst_port = random.choice([443, 80, 22, 8080])
-            service_label = "HTTPS" if dst_port == 443 else ("HTTP" if dst_port == 80 else ("SSH" if dst_port == 22 else "HTTP-ALT"))
+            svc_label = "HTTPS" if dst_port == 443 else ("HTTP" if dst_port == 80 else ("SSH" if dst_port == 22 else "HTTP-ALT"))
             
             if dst_port == 443:
-                dst_host = random.choice(sni_hosts)
+                dst_host = random.choice(sni_list)
                 host_source = "sni"
             elif dst_port == 80:
-                dst_host = random.choice(domains)
+                dst_host = random.choice(dom_list)
                 host_source = "dns"
             else:
                 dst_host = "unknown"
                 host_source = "unknown"
                 
-            pkts = random.randint(10, 500)
-            bytes_count = pkts * random.randint(64, 1400)
+            pkt_cnt = random.randint(10, 500)
+            byte_cnt = pkt_cnt * random.randint(64, 1400)
             
             conn.execute("""
                 INSERT INTO flow_sessions (device_mac, proto, src_ip, dst_ip, dst_port, dst_host, host_source, first_seen, last_seen, packet_count, byte_count, service_label)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (device["mac"], proto, device["ip"], f"142.250.{random.randint(1,254)}.{random.randint(1,254)}", dst_port, dst_host, host_source, ts.isoformat(), (ts + timedelta(seconds=random.randint(5, 300))).isoformat(), pkts, bytes_count, service_label))
+            """, (device["mac"], proto, device["ip"], f"142.250.{random.randint(1,254)}.{random.randint(1,254)}", dst_port, dst_host, host_source, ts.isoformat(), (ts + timedelta(seconds=random.randint(5, 300))).isoformat(), pkt_cnt, byte_cnt, svc_label))
 
-        # Generate mock plaintext events (Track 2)
-        if device["mac"] == "a4:83:e7:12:34:56":  # Johns-iPhone
+        # plaintext samples for a couple devices
+        if device["mac"] == "a4:83:e7:12:34:56":  # johns iphone
             ts = first_seen + timedelta(minutes=10)
             conn.execute("""
                 INSERT INTO plaintext_events (device_mac, proto, host_or_server, method_or_command, body, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (device["mac"], "http", "detectportal.firefox.com", "GET", "GET /success.txt HTTP/1.1\r\nHost: detectportal.firefox.com\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 8\r\n\r\nsuccess\n", ts.isoformat()))
             
-        elif device["mac"] == "dc:a6:32:ab:cd:ef":  # Dell Desktop
+        elif device["mac"] == "dc:a6:32:ab:cd:ef":  # dell desktop
             ts = first_seen + timedelta(minutes=15)
             conn.execute("""
                 INSERT INTO plaintext_events (device_mac, proto, host_or_server, method_or_command, body, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (device["mac"], "smtp", "mail.example.com", "EHLO", "220 mail.example.com ESMTP Postfix\r\nEHLO DESKTOP-8H3KL2\r\n250-mail.example.com\r\n250-PIPELINING\r\n250-SIZE 10240000\r\n250-ETRN\r\n250-STARTTLS\r\n250-ENHANCEDSTATUSCODES\r\n250-8BITMIME\r\n250-DSN\r\n250-SMTPUTF8\r\n250 CHUNKING\r\n", ts.isoformat()))
 
-        print(f"    └─ DNS + TLS SNI + JA3 + mDNS + flows + plaintext rows generated")
+        print(f"    done - dns/tls/ja3/mdns/flows/plaintext for this device")
         conn.commit()
 
     conn.close()
 
-    print(f"\n[+] Mock data generated successfully!")
-    print(f"[+] Total devices: {len(MOCK_DEVICES)}")
-    print(f"[+] Total DNS queries: {len(MOCK_DEVICES) * num_queries_per_device}")
-    print(f"\n[*] Start the dashboard with: python web/app.py")
+    print(f"\n[+] mock data done")
+    print(f"[+] devices: {len(MOCK_DEVICES)}")
+    print(f"[+] dns rows (approx): {len(MOCK_DEVICES) * num_queries_per_device}")
+    print(f"\n[*] run dashboard: python web/app.py")
 
 
 def add_more_queries(num_additional=10):
     """Add more DNS queries to existing devices for testing real-time updates."""
-    print(f"[*] Adding {num_additional} more queries per device...\n")
+    print(f"[*] adding {num_additional} extra dns per device...\n")
 
     for device in MOCK_DEVICES:
         for _ in range(num_additional):
             domain = random.choice(device["domains"])
             insert_dns(device["mac"], domain)
-        print(f"[+] Added {num_additional} DNS queries for {device['hostname']}")
+        print(f"[+] +{num_additional} dns for {device['hostname']}")
 
-    print(f"\n[+] Additional queries added. Refresh your dashboard to see updates.")
+    print(f"\n[+] done, refresh the dashboard to see new rows")
 
 
 if __name__ == "__main__":
     if "--reset" in sys.argv:
-        print("[!] Resetting database...")
+        print("[!] wiping db...")
         init_db()
         with sqlite3.connect(_db_path()) as conn:
             _clear_all_data(conn)
             conn.commit()
-        print("[+] Database reset complete.\n")
+        print("[+] db cleared\n")
 
     if "--more" in sys.argv:
         add_more_queries(num_additional=20)
     else:
-        num_queries = 25 if "--many" in sys.argv else 15
-        generate_mock_data(num_queries_per_device=num_queries)
+        q_per_dev = 25 if "--many" in sys.argv else 15
+        generate_mock_data(num_queries_per_device=q_per_dev)

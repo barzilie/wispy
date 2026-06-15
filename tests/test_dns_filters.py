@@ -21,4 +21,4 @@ def test_allows_normal_hosts():
 if __name__ == '__main__':
     test_blocks_common_ad_hosts()
     test_allows_normal_hosts()
-    print('dns_filters tests OK')
+    print('dns filter tests ok')

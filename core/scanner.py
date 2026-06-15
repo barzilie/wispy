@@ -6,21 +6,21 @@ import threading
 
 def enable_monitor_mode(interface="wlan0"):
     """Switches the interface to monitor mode. Returns the monitor interface name."""
-    # Kill processes that interfere with monitor mode (NetworkManager, wpa_supplicant)
+    # kill networkmanager etc so airmon works
     subprocess.run(["airmon-ng", "check", "kill"], capture_output=True)
     subprocess.run(["airmon-ng", "start", interface], capture_output=True, text=True)
     time.sleep(1)
 
-    # Use 'iw dev' to reliably find whatever interface ended up in monitor mode
-    mon = _find_monitor_interface()
-    if mon:
-        return mon
+    # iw dev usually tells us the mon iface name
+    mon_if = _find_monitor_interface()
+    if mon_if:
+        return mon_if
 
-    # Fallback: wlan0mon, then the original interface name
-    for candidate in [interface + "mon", interface]:
-        r = subprocess.run(["ip", "link", "show", candidate], capture_output=True)
+    # fallback guesses
+    for guess in [interface + "mon", interface]:
+        r = subprocess.run(["ip", "link", "show", guess], capture_output=True)
         if r.returncode == 0:
-            return candidate
+            return guess
 
     return interface
 
@@ -63,14 +63,14 @@ def scan_networks(mon_interface="wlan0", duration=15):
     """
     from scapy.all import sniff, Dot11, Dot11Beacon, Dot11ProbeResp, Dot11Elt
 
-    networks = {}  # keyed by BSSID to avoid duplicates
+    found_nets = {}  # bssid -> net dict, skip dupes
 
     def handle_packet(pkt):
         if not (pkt.haslayer(Dot11Beacon) or pkt.haslayer(Dot11ProbeResp)):
             return
 
         bssid = pkt[Dot11].addr2
-        if not bssid or bssid in networks:
+        if not bssid or bssid in found_nets:
             return
 
         try:
@@ -80,27 +80,27 @@ def scan_networks(mon_interface="wlan0", duration=15):
         if not ssid:
             return
 
-        # Extract channel from DS Parameter Set element (ID 3)
-        channel = 6
+        # channel from DS param element id 3
+        chan = 6
         elt = pkt[Dot11Elt]
         while elt and hasattr(elt, "ID"):
             if elt.ID == 3 and elt.len == 1:
-                channel = elt.info[0] if isinstance(elt.info, (bytes, bytearray)) else elt.info
+                chan = elt.info[0] if isinstance(elt.info, (bytes, bytearray)) else elt.info
                 break
             elt = elt.payload
 
-        # Privacy bit in beacon/probe-response capability field
+        # privacy bit = wpa usually
         if pkt.haslayer(Dot11Beacon):
             cap = pkt[Dot11Beacon].cap
         else:
             cap = pkt[Dot11ProbeResp].cap
-        encryption = "WPA" if cap.privacy else "Open"
+        enc_type = "WPA" if cap.privacy else "Open"
 
-        networks[bssid] = {
+        found_nets[bssid] = {
             "ssid": ssid,
             "bssid": bssid,
-            "channel": int(channel),
-            "encryption": encryption,
+            "channel": int(chan),
+            "encryption": enc_type,
         }
 
     stop_event = threading.Event()
@@ -109,36 +109,36 @@ def scan_networks(mon_interface="wlan0", duration=15):
     )
     hopper.start()
 
-    print(f"[*] Listening for beacons on {mon_interface} for {duration}s...")
+    print(f"[*] sniffing beacons on {mon_interface} for {duration}s...")
     sniff(iface=mon_interface, prn=handle_packet, timeout=duration, store=False)
 
     stop_event.set()
     hopper.join(timeout=2)
 
-    # Deduplicate by SSID, keeping first seen per SSID
-    seen_ssids = set()
-    unique = []
-    for net in networks.values():
-        if net["ssid"] not in seen_ssids:
-            seen_ssids.add(net["ssid"])
-            unique.append(net)
+    # one entry per ssid
+    seen = set()
+    out = []
+    for net in found_nets.values():
+        if net["ssid"] not in seen:
+            seen.add(net["ssid"])
+            out.append(net)
 
-    return unique
+    return out
 
 
 def prompt_user_selection(networks):
-    print("\nNetworks found:\n")
+    print("\nfound networks:\n")
     for i, net in enumerate(networks):
-        enc = net.get("encryption", "Unknown")
-        ch = net.get("channel", "?")
-        print(f"  [{i+1}] SSID: {net['ssid']:<30} Channel: {ch:<4} Encryption: {enc}")
+        enc = net.get("encryption", "?")
+        chan = net.get("channel", "?")
+        print(f"  [{i+1}] SSID: {net['ssid']:<30} ch: {chan:<4} enc: {enc}")
 
     print()
     while True:
         try:
-            choice = int(input("Select network to mimic [number]: ")) - 1
-            if 0 <= choice < len(networks):
-                return networks[choice]
+            pick = int(input("pick network number to mimic: ")) - 1
+            if 0 <= pick < len(networks):
+                return networks[pick]
         except ValueError:
             pass
-        print("Invalid choice. Try again.")
+        print("bad choice, try again")

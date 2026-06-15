@@ -64,7 +64,7 @@ def start_dnsmasq():
 
 def teardown(processes, interface="wlan0", outbound_interface="eth0"):
     """Kills all started processes and cleans up iptables and interface state."""
-    print("\n[*] Shutting down...")
+    print("\n[*] shutting down ap stuff...")
     for p in processes:
         p.terminate()
 
@@ -79,4 +79,4 @@ def teardown(processes, interface="wlan0", outbound_interface="eth0"):
         if os.path.exists(f):
             os.remove(f)
 
-    print("[*] Cleanup done.")
+    print("[*] cleanup finished")

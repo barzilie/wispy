@@ -51,7 +51,7 @@ def test_flow_session_insert_and_aggregate():
     assert rows[0]['byte_count'] == 2000
     assert rows[0]['dst_host'] == 'www.google.com'
     assert rows[0]['host_source'] == 'dns'
-    print('[PASS] flow_session_insert_and_aggregate')
+    print('[pass] flow_session_insert_and_aggregate')
 
 
 def test_flow_session_pagination():
@@ -65,7 +65,7 @@ def test_flow_session_pagination():
     assert count_flow_sessions() >= 12
     page = get_flow_sessions(limit=5, offset=0)
     assert len(page) == 5
-    print('[PASS] flow_session_pagination')
+    print('[pass] flow_session_pagination')
 
 
 def test_plaintext_insert_and_pagination():
@@ -79,7 +79,7 @@ def test_plaintext_insert_and_pagination():
     assert count_plaintext_events(device_mac=MAC) == 2
     limited = get_plaintext_events(limit=1, device_mac=MAC)
     assert len(limited) == 1
-    print('[PASS] plaintext_insert_and_pagination')
+    print('[pass] plaintext_insert_and_pagination')
 
 
 def test_dns_correlation_cache():
@@ -91,7 +91,7 @@ def test_dns_correlation_cache():
     unknown_host, unknown_source = correlation.resolve_ip_to_host(MAC, '1.2.3.4')
     assert unknown_host is None
     assert unknown_source == 'unknown'
-    print('[PASS] dns_correlation_cache')
+    print('[pass] dns_correlation_cache')
 
 
 def test_device_patterns_heuristics():
@@ -107,14 +107,14 @@ def test_device_patterns_heuristics():
     tags = {p['tag'] for p in result['detected_patterns']}
     assert 'PLAINTEXT_LEAKS' in tags
     assert 'SOCIAL_MEDIA' in tags
-    print('[PASS] device_patterns_heuristics')
+    print('[pass] device_patterns_heuristics')
 
 
 if __name__ == '__main__':
-    print('Running extension tests...\n')
+    print('running extension tests\n')
     test_flow_session_insert_and_aggregate()
     test_flow_session_pagination()
     test_plaintext_insert_and_pagination()
     test_dns_correlation_cache()
     test_device_patterns_heuristics()
-    print('\nAll extension tests passed.')
+    print('\nall extension tests passed')

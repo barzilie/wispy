@@ -1,27 +1,26 @@
 """
-WiSpy Configuration
-Handles mock mode detection and configuration
+wispy config stuff - mock mode etc
 """
 
 import os
 import platform
 
-# Auto-detect platform
+# figure out what OS we're on
 IS_MACOS = platform.system() == 'Darwin'
 IS_KALI = platform.system() == 'Linux' and os.path.exists('/etc/os-release')
 
-# Mock mode: can be overridden with environment variable
-# Default: True on macOS, False on Linux/Kali
+# mock mode, override in .env if you want
+# defaults to true on mac and false on kali/linux
 MOCK_MODE = os.getenv('WISPY_MOCK_MODE', 'true' if IS_MACOS else 'false').lower() == 'true'
 
-# Flask configuration
+# flask host/port
 FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
 FLASK_PORT = int(os.getenv('FLASK_PORT', '5000'))
 
-# Wireless interface (only used in real mode)
+# wifi iface - only matters when not in mock mode
 WIFI_INTERFACE = os.getenv('WIFI_INTERFACE', 'wlan0')
 
-# Google API key for recommendations
+# gemini api key
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '')
 
 def get_mode_info():
@@ -37,10 +36,10 @@ def get_mode_info():
 def print_startup_info():
     """Print startup configuration"""
     print("\n" + "="*60)
-    print("🕵️  WiSpy Network Surveillance System")
+    print("WiSpy - network monitoring thing")
     print("="*60)
     print(f"Platform:        {platform.system()}")
     print(f"Mock Mode:       {'ENABLED' if MOCK_MODE else 'DISABLED'}")
-    print(f"WiFi Interface:  {WIFI_INTERFACE if not MOCK_MODE else 'Mock Data'}")
+    print(f"WiFi Interface:  {WIFI_INTERFACE if not MOCK_MODE else 'mock data'}")
     print(f"Flask Server:    {FLASK_HOST}:{FLASK_PORT}")
     print("="*60 + "\n")

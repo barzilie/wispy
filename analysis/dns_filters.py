@@ -6,7 +6,7 @@ Patterns are substring/regex matches on the full queried name (lowercased).
 import re
 from typing import Pattern
 
-# Hostname-shaped tokens common to ad tech; extend as needed.
+# ad/tracker hostname fragments - add more if needed
 _AD_REGEX_PARTS = [
     r"doubleclick\.net",
     r"googlesyndication\.com",

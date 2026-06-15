@@ -29,7 +29,7 @@ def run_agent(mode="investigate"):
             "Connect a target client to the rogue AP to begin collecting data."
         )
 
-    # Pick prompt based on mode
+    # pick investigate vs recommend prompt
     if mode == "investigate":
         prompt = get_investigate_prompt(context)
     elif mode == "recommend":
@@ -47,7 +47,7 @@ def run_agent(mode="investigate"):
             
             text = getattr(response, "text", None) or ""
             if not text.strip():
-                # Fallback extraction from response candidates
+                # gemini sometimes puts text in candidates not .text
                 parts = getattr(response, "candidates", None) or []
                 if parts:
                     content = getattr(parts[0], "content", None)

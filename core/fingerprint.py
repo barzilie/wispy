@@ -4,8 +4,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from scapy.all import conf
 
-# Devices connected directly to our AP lose at most 1 TTL hop, so initial
-# values cluster tightly around the OS defaults below.
+# ttl on our ap is basically 1 hop from client so these ranges work ok
 _TTL_MAP = [
     (range(60, 66),  "Linux / Android"),
     (range(124, 130), "Windows"),

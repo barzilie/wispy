@@ -41,7 +41,7 @@ def init_db():
                 last_seen  TEXT
             )
         """)
-        # Backfill new columns on existing installations.
+        # migration for older db files
         cols = conn.execute("PRAGMA table_info(devices)").fetchall()
         col_names = {row[1] for row in cols}
         if "dhcp_params" not in col_names:
@@ -216,7 +216,7 @@ def upsert_flow_session(device_mac, proto, src_ip, dst_ip, dst_port, dst_host, h
     """Inserts a new flow session or aggregates updates into an existing recent session."""
     with _connect() as conn:
         conn.row_factory = sqlite3.Row
-        # Find the latest session for this flow key
+        # reuse recent row for same 5-tuple if still active
         row = conn.execute("""
             SELECT id, first_seen, last_seen, packet_count, byte_count, dst_host, host_source
             FROM flow_sessions
@@ -473,7 +473,7 @@ def reset_db():
     """Deletes all data from telemetry tables after user confirmation."""
     confirm = input("This will delete ALL data from the database. Type 'yes' to confirm: ")
     if confirm.strip().lower() != 'yes':
-        print("Reset cancelled.")
+        print("reset cancelled")
         return
     with _connect() as conn:
         conn.execute("DELETE FROM devices")
@@ -487,7 +487,7 @@ def reset_db():
             "DELETE FROM sqlite_sequence WHERE name IN ('dns_requests', 'tls_sni', 'ja3_fingerprints', 'mdns_broadcasts', 'flow_sessions', 'plaintext_events')"
         )
         conn.commit()
-    print("Database reset.")
+    print("db wiped")
 
 
 def get_session_summary():
