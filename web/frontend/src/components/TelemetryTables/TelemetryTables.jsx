@@ -11,7 +11,7 @@ const TelemetryTables = ({ tlsSni = [], ja3 = [], mdns = [] }) => {
       <section className="section">
         <h2>🔐 TLS / JA3 / mDNS</h2>
         <p className="telemetry-empty">
-          No TLS ClientHello, JA3, or mDNS rows yet. Run the sniffer against live traffic or load mock data.
+          No TLS ClientHello, JA3, or mDNS rows yet. Run the sniffer against live traffic on the rogue AP.
         </p>
       </section>
     );

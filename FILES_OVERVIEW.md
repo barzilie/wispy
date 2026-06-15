@@ -6,33 +6,15 @@ Quick reference for where everything is and what it does.
 
 | File | Purpose | Edit This To... |
 |------|---------|-----------------|
-| `.env` | Environment config | Override mock mode, set API keys |
-| `config.py` | Central configuration | Auto-detects platform, reads `.env` |
-| `MOCK_MODE_GUIDE.md` | Mock system docs | Learn how to use mock data (networks, `mock_data.py`, modes) |
-
-## 🧪 Mock Data (Development)
-
-| File | Purpose | Edit This To... |
-|------|---------|-----------------|
-| `mock/mock_networks.py` | WiFi networks for scanning | Add/edit fake networks |
-| `mock_data.py` | SQLite populator: devices, DNS, TLS SNI, JA3, mDNS, DHCP Option 55 | Edit `MOCK_DEVICES` or run with `--reset` / `--more` |
-| `mock/README.md` | Mock system documentation | - |
-
-**Usage:**
-```bash
-# Edit networks
-nano mock/mock_networks.py
-
-# Generate device data
-python mock_data.py
-```
+| `.env` | Environment config | Set API keys, WiFi interface, Flask host/port |
+| `config.py` | Central configuration | Reads `.env` and exposes shared settings |
 
 ## 🌐 Backend (Python/Flask)
 
 | File | Purpose |
 |------|---------|
 | `web/app.py` | Flask API server (all endpoints) |
-| `core/scanner.py` | WiFi scanning (real mode) |
+| `core/scanner.py` | WiFi scanning |
 | `core/sniffer.py` | Packet capture: DNS, DHCP, mDNS, TLS (SNI/JA3), flow sessions, plaintext HTTP/SMTP |
 | `core/ap_manager.py` | Rogue AP setup (hostapd/dnsmasq) |
 | `core/fingerprint.py` | Device OS detection |
@@ -84,7 +66,6 @@ ComponentName/
 | `INSTALLATION.md` | Kali Linux setup instructions |
 | `plan.md` | Development plan & decisions |
 | `Impl_report.md` | Implementation details & debugging |
-| `MOCK_MODE_GUIDE.md` | **How to control mock data** |
 | `web/frontend/COMPONENTS.md` | React component documentation |
 | `FILES_OVERVIEW.md` | This file |
 
@@ -107,10 +88,10 @@ ComponentName/
 
 | File | Purpose | How to Run |
 |------|---------|-----------|
+| `start_wispy.py` | Start Flask + React together | `python start_wispy.py` |
 | `web/app.py` | Flask API server | `python web/app.py` |
 | `web/frontend/` | React dev server | `cd web/frontend && npm start` |
-| `main.py` | Full system launcher (Kali only) | `sudo python main.py` |
-| `mock_data.py` | Mock data generator | `python mock_data.py` |
+| `main.py` | Full system launcher (legacy CLI) | `sudo python main.py` |
 
 ## 🔧 Configuration Files
 
@@ -127,10 +108,6 @@ ComponentName/
 
 **Want to change...**
 
-→ **Mock WiFi networks?** Edit `mock/mock_networks.py`
-
-→ **Mock devices?** Run `python mock_data.py` (or edit that file)
-
 → **React components?** Go to `web/frontend/src/components/`
 
 → **API endpoints?** Edit `web/app.py`
@@ -145,33 +122,18 @@ ComponentName/
 
 ## 🎯 Common Tasks
 
-### Add a new mock network
-```bash
-# Edit this file
-nano mock/mock_networks.py
-
-# Restart Flask
-python web/app.py
-```
-
-### Add mock device data
-```bash
-python mock_data.py --more
-```
-
 ### Create new React component
 ```bash
 mkdir web/frontend/src/components/MyComponent
 touch web/frontend/src/components/MyComponent/MyComponent.{jsx,logic.js,css}
 ```
 
-### Check current mode
+### Check current status
 ```bash
 curl http://localhost:5000/api/status
 ```
 
-### Switch from mock to real mode
+### Start the full stack
 ```bash
-# In .env file
-WISPY_MOCK_MODE=false
+python start_wispy.py
 ```

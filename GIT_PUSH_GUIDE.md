@@ -88,9 +88,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cd web/frontend && npm install && cd ../..
 
-# Generate mock data
-python mock_data.py
-
 # Run
 python start_wispy.py
 ```
@@ -98,7 +95,7 @@ python start_wispy.py
 ## ⚠️ Important Notes
 
 1. **`.env` file is ignored** - Create a `.env.example` if you want to share config template
-2. **Database is ignored** - Others will need to run `python mock_data.py`
+2. **Database is ignored** - Telemetry is populated by the live sniffer when clients connect to the rogue AP
 3. **node_modules is ignored** - Others will run `npm install` to get dependencies
 4. **Virtual env is ignored** - Others will create their own with `python3 -m venv .venv`
 

@@ -7,8 +7,8 @@ import threading
 def enable_monitor_mode(interface="wlan0"):
     """Switches the interface to monitor mode. Returns the monitor interface name."""
     # kill networkmanager etc so airmon works
-    subprocess.run(["airmon-ng", "check", "kill"], capture_output=True)
-    subprocess.run(["airmon-ng", "start", interface], capture_output=True, text=True)
+    subprocess.run(["sudo", "airmon-ng", "check", "kill"], capture_output=True)
+    subprocess.run(["sudo", "airmon-ng", "start", interface], capture_output=True, text=True)
     time.sleep(1)
 
     # iw dev usually tells us the mon iface name
@@ -18,7 +18,7 @@ def enable_monitor_mode(interface="wlan0"):
 
     # fallback guesses
     for guess in [interface + "mon", interface]:
-        r = subprocess.run(["ip", "link", "show", guess], capture_output=True)
+        r = subprocess.run(["sudo", "ip", "link", "show", guess], capture_output=True)
         if r.returncode == 0:
             return guess
 
@@ -26,12 +26,12 @@ def enable_monitor_mode(interface="wlan0"):
 
 
 def disable_monitor_mode(mon_interface="wlan0mon"):
-    subprocess.run(["airmon-ng", "stop", mon_interface], capture_output=True)
+    subprocess.run(["sudo", "airmon-ng", "stop", mon_interface], capture_output=True)
 
 
 def _find_monitor_interface():
     """Parse 'iw dev' output to find any interface currently in monitor mode."""
-    result = subprocess.run(["iw", "dev"], capture_output=True, text=True)
+    result = subprocess.run(["sudo", "iw", "dev"], capture_output=True, text=True)
     current_iface = None
     for line in result.stdout.splitlines():
         line = line.strip()
@@ -50,7 +50,7 @@ def _channel_hopper(interface, stop_event):
             if stop_event.is_set():
                 return
             subprocess.run(
-                ["iw", "dev", interface, "set", "channel", str(ch)],
+                ["sudo", "iw", "dev", interface, "set", "channel", str(ch)],
                 capture_output=True,
             )
             time.sleep(0.4)

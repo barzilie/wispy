@@ -27,33 +27,17 @@ Then open: **http://localhost:3001**
 
 ---
 
-## ⚙️ Platform-Specific Instructions
+## ⚙️ Platform Notes
 
-### macOS (Development - Mock Mode)
+WiSpy requires Kali Linux with a compatible wireless adapter for scanning and rogue AP deployment. See `INSTALLATION.md` for driver and sudoers setup.
+
+On Kali, the sniffer may need root. If capture stays empty after a client connects, run in a second terminal:
+
 ```bash
-# Easy way
-python start_wispy.py
-
-# Manual way
-# Terminal 1:
-source .venv/bin/activate
-python web/app.py
-
-# Terminal 2:
-cd web/frontend
-npm start
+sudo .venv/bin/python core/sniffer.py
 ```
 
-### Kali Linux (Production - Real Mode)
-```bash
-# Backend needs sudo for wireless access
-# Terminal 1:
-sudo .venv/bin/python web/app.py
-
-# Terminal 2:
-cd web/frontend
-npm start
-```
+Or set `WISPY_SNIFFER_SUDO=true` in `.env` with passwordless sudo configured.
 
 ---
 
@@ -90,7 +74,7 @@ After starting, check that both servers are running:
 curl http://localhost:5000/api/status
 
 # Expected response:
-# {"mock_mode": true, "monitoring": false, ...}
+# {"monitoring": false, "scanning": false, ...}
 
 # Check React frontend
 # Open browser: http://localhost:3001
@@ -127,11 +111,8 @@ npm install
 cd ../..
 ```
 
-### Mock Mode Not Working
-Check that `mock/mock_networks.py` exists and Flask startup shows:
-```
-Mock Mode: ENABLED
-```
+### Scanner Finds No Networks
+Check the wireless driver per `INSTALLATION.md` — `rtl8xxxu` must not be loaded; use `8188eu` for the TL-WN722N.
 
 ---
 
@@ -162,7 +143,6 @@ start_wispy.py
 | `python start_wispy.py` | Start both servers automatically |
 | `python web/app.py` | Start Flask backend only |
 | `cd web/frontend && npm start` | Start React frontend only |
-| `python mock_data.py` | Generate mock device data |
 | `curl localhost:5000/api/status` | Check Flask status |
 
 ---
@@ -174,8 +154,8 @@ start_wispy.py
 - [ ] Activate venv: `source .venv/bin/activate`
 - [ ] Install Python deps: `pip install -r requirements.txt`
 - [ ] Install React deps: `cd web/frontend && npm install`
-- [ ] Create `.env` file (copy from template in docs)
-- [ ] Generate mock data: `python mock_data.py`
+- [ ] Create `.env` file (copy from `.env.example`)
+- [ ] Configure wireless driver and sudoers per `INSTALLATION.md`
 - [ ] Start app: `python start_wispy.py`
 - [ ] Open browser: `http://localhost:3001`
 

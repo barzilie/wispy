@@ -36,31 +36,14 @@ Both processes communicate via a shared SQLite database at `data/wispy.db`. No w
 
 ## Running the Project
 
-### Mock Mode vs Real Mode
-
-WiSpy automatically detects your platform:
-- **macOS** → Mock mode (uses fake data from `mock/mock_networks.py`)
-- **Kali Linux** → Real mode (uses actual wireless scanner)
-
-**Override in `.env`:**
-```bash
-WISPY_MOCK_MODE=true   # Force mock mode
-WISPY_MOCK_MODE=false  # Force real mode
-```
-
-See `MOCK_MODE_GUIDE.md` for complete details.
-
 ### Prerequisites
 
-**For Development (macOS):**
-- Python 3.9+
-- Node.js (for React frontend)
-
-**For Production (Kali Linux):**
 - **Kali Linux** (native or VirtualBox with USB passthrough)
 - **TP-Link TL-WN722N** wireless adapter (Realtek RTL8188EUS chipset)
 - Custom `8188eu` driver installed via DKMS (see INSTALLATION.md)
 - System packages: `hostapd dnsmasq aircrack-ng iw net-tools`
+- Python 3.9+
+- Node.js (for React frontend)
 
 ### Environment Setup
 ```bash
@@ -71,9 +54,9 @@ pip install -r requirements.txt
 
 Create `.env` file with:
 ```
-WISPY_MOCK_MODE=true     # Optional: override auto-detection
 GOOGLE_API_KEY=<your-key>
 WIFI_INTERFACE=wlan0
+OUTBOUND_INTERFACE=eth0
 FLASK_HOST=0.0.0.0
 FLASK_PORT=5000
 ```

@@ -19,10 +19,10 @@ Then open: **http://localhost:3001**
 
 ## ⚠️ Important Notes:
 
-- **DO NOT use `main.py`** - That's the old version
+- **DO NOT use `main.py`** - That's the old CLI version
 - **Use `start_wispy.py`** - The new launcher
 - You need **both** Flask and React running
-- Mock mode is automatic on macOS
+- Requires Kali Linux with a compatible wireless adapter — see `INSTALLATION.md`
 
 ---
 
@@ -39,8 +39,9 @@ cd web/frontend
 npm install
 cd ../..
 
-# 3. Generate mock data
-python mock_data.py
+# 3. Configure environment
+cp .env.example .env
+# Edit .env with your GOOGLE_API_KEY, WIFI_INTERFACE, etc.
 
 # 4. Start the app
 python start_wispy.py

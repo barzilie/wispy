@@ -27,14 +27,8 @@ import atexit
 ap_processes = []
 
 
-# config imports
-from config import MOCK_MODE, FLASK_HOST, FLASK_PORT, WIFI_INTERFACE, print_startup_info, get_mode_info
-
-# mock vs real scanner
-if MOCK_MODE:
-    from mock.mock_networks import get_mock_networks
-else:
-    from core.scanner import enable_monitor_mode, scan_networks
+from config import FLASK_HOST, FLASK_PORT, WIFI_INTERFACE, print_startup_info, get_mode_info
+from core.scanner import enable_monitor_mode, scan_networks
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 CORS(app)  # cors for react dev server
@@ -45,7 +39,6 @@ scan_state = {
     'networks': [],
     'selected_network': None,
     'monitoring': False,
-    'mock_mode': MOCK_MODE
 }
 
 
@@ -187,7 +180,7 @@ def api_recommend():
 
 @app.route('/api/start-scan', methods=['POST'])
 def start_scan():
-    """Start WiFi scanning (mock for macOS, real on Kali)"""
+    """Start WiFi scanning on the configured interface."""
     global scan_state
 
     if scan_state['scanning']:
@@ -196,19 +189,12 @@ def start_scan():
     scan_state['scanning'] = True
 
     try:
-        if MOCK_MODE:
-            # dev mode fake networks
-            print("[mock] using fake wifi list")
-            networks = get_mock_networks()
-        else:
-            # real scan on kali
-            print(f"[real] scanning {WIFI_INTERFACE}...")
-            mon_if = enable_monitor_mode(WIFI_INTERFACE)
-            networks = scan_networks(mon_if, duration=15)
-            # add signal field so frontend doesnt complain
-            for net in networks:
-                if 'signal' not in net:
-                    net['signal'] = -60  # made up rssi
+        print(f"[*] scanning {WIFI_INTERFACE}...")
+        mon_if = enable_monitor_mode(WIFI_INTERFACE)
+        networks = scan_networks(mon_if, duration=15)
+        for net in networks:
+            if 'signal' not in net:
+                net['signal'] = -60
 
         scan_state['networks'] = networks
         scan_state['scanning'] = False
@@ -216,16 +202,14 @@ def start_scan():
         return jsonify({
             'status': 'complete',
             'networks': networks,
-            'mock_mode': MOCK_MODE
         })
 
     except Exception as e:
         scan_state['scanning'] = False
-        print(f"[error] scan blew up: {e}")
+        print(f"[error] scan failed: {e}")
         return jsonify({
             'status': 'error',
             'message': str(e),
-            'mock_mode': MOCK_MODE
         }), 500
 
 
@@ -370,63 +354,59 @@ def select_network():
     scan_state['monitoring'] = True
     extra = {}
 
-    # on real hardware spin up hostapd dnsmasq sniffer
-    if not MOCK_MODE:
+    try:
+        from core.scanner import disable_monitor_mode
+        from core.ap_manager import configure_interface, write_hostapd_conf, write_dnsmasq_conf, enable_routing, start_hostapd, start_dnsmasq
+
+        mon_if = WIFI_INTERFACE + "mon"
         try:
-            from core.scanner import disable_monitor_mode
-            from core.ap_manager import configure_interface, write_hostapd_conf, write_dnsmasq_conf, enable_routing, start_hostapd, start_dnsmasq
-            
-            # turn off monitor mode if we left it on
-            mon_if = WIFI_INTERFACE + "mon"
-            try:
-                disable_monitor_mode(mon_if)
-            except Exception as e:
-                print(f"[ap] monitor mode disable warning: {e}")
-
-            print(f"[ap] setting up {WIFI_INTERFACE}...")
-            configure_interface(WIFI_INTERFACE)
-
-            print("[ap] writing hostapd + dnsmasq configs")
-            write_hostapd_conf(picked['ssid'], picked.get('channel', 6), WIFI_INTERFACE)
-            write_dnsmasq_conf(WIFI_INTERFACE)
-
-            wan_if = os.getenv("OUTBOUND_INTERFACE", "eth0")
-            print(f"[ap] nat on {wan_if}...")
-            enable_routing(wan_if)
-
-            print("[ap] starting hostapd and dnsmasq")
-            p_hostapd = start_hostapd()
-            _assert_process_running(p_hostapd, "hostapd")
-            ap_processes.append(p_hostapd)
-
-            p_dnsmasq = start_dnsmasq()
-            _assert_process_running(p_dnsmasq, "dnsmasq")
-            ap_processes.append(p_dnsmasq)
-
-            print("[ap] starting sniffer subprocess")
-            proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            sniffer_script = os.path.join(proj_root, 'core', 'sniffer.py')
-            p_sniff, used_sudo = _start_sniffer_process(proj_root, sniffer_script)
-            ap_processes.append(p_sniff)
-
-            print("[ap] rogue ap should be up now")
-            if not used_sudo:
-                extra['sniffer_warning'] = (
-                    "Sniffer started without root; capture may be empty. "
-                    "Set WISPY_SNIFFER_SUDO=true in .env (with passwordless sudo for the sniffer), "
-                    "or run: sudo .venv/bin/python core/sniffer.py"
-                )
-
+            disable_monitor_mode(mon_if)
         except Exception as e:
-            print(f"[ap] deploy failed: {e}")
-            cleanup_ap_processes()
-            scan_state['monitoring'] = False
-            scan_state['selected_network'] = None
-            return jsonify({'status': 'error', 'message': f'Failed to deploy AP: {e}'}), 500
+            print(f"[ap] monitor mode disable warning: {e}")
+
+        print(f"[ap] setting up {WIFI_INTERFACE}...")
+        configure_interface(WIFI_INTERFACE)
+
+        print("[ap] writing hostapd + dnsmasq configs")
+        write_hostapd_conf(picked['ssid'], picked.get('channel', 6), WIFI_INTERFACE)
+        write_dnsmasq_conf(WIFI_INTERFACE)
+
+        wan_if = os.getenv("OUTBOUND_INTERFACE", "eth0")
+        print(f"[ap] nat on {wan_if}...")
+        enable_routing(wan_if)
+
+        print("[ap] starting hostapd and dnsmasq")
+        p_hostapd = start_hostapd()
+        _assert_process_running(p_hostapd, "hostapd")
+        ap_processes.append(p_hostapd)
+
+        p_dnsmasq = start_dnsmasq()
+        _assert_process_running(p_dnsmasq, "dnsmasq")
+        ap_processes.append(p_dnsmasq)
+
+        print("[ap] starting sniffer subprocess")
+        proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        sniffer_script = os.path.join(proj_root, 'core', 'sniffer.py')
+        p_sniff, used_sudo = _start_sniffer_process(proj_root, sniffer_script)
+        ap_processes.append(p_sniff)
+
+        print("[ap] rogue ap should be up now")
+        if not used_sudo:
+            extra['sniffer_warning'] = (
+                "Sniffer started without root; capture may be empty. "
+                "Set WISPY_SNIFFER_SUDO=true in .env (with passwordless sudo for the sniffer), "
+                "or run: sudo .venv/bin/python core/sniffer.py"
+            )
+
+    except Exception as e:
+        print(f"[ap] deploy failed: {e}")
+        cleanup_ap_processes()
+        scan_state['monitoring'] = False
+        scan_state['selected_network'] = None
+        return jsonify({'status': 'error', 'message': f'Failed to deploy AP: {e}'}), 500
 
     body = {'status': 'success', 'network': picked}
-    if not MOCK_MODE:
-        body.update(extra)
+    body.update(extra)
     return jsonify(body)
 
 
@@ -448,7 +428,6 @@ def get_status():
         'scanning': scan_state['scanning'],
         'monitoring': scan_state['monitoring'],
         'selected_network': scan_state['selected_network'],
-        'mock_mode': MOCK_MODE,
         'mode_info': get_mode_info()
     })
 

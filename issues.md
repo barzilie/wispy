@@ -84,14 +84,6 @@ Immediate-exit checks were added for hostapd/dnsmasq/sniffer. Daemons can still 
 
 ---
 
-### Mock data coverage
-
-**File:** `mock_data.py`
-
-Only two devices get sample plaintext events; sufficient for demo but uneven.
-
----
-
 ### Tests in minimal environments
 
 **File:** `tests/test_extension.py`

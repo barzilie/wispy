@@ -126,7 +126,6 @@ nano .env
 | `OUTBOUND_INTERFACE` | Uplink for NAT when the rogue AP is live (default: `eth0`) — check with `ip link` |
 | `FLASK_HOST` | Dashboard bind address (default: `0.0.0.0`) |
 | `FLASK_PORT` | Dashboard port (default: `5000`) |
-| `WISPY_MOCK_MODE` | Set `false` on Kali for real Wi‑Fi/AP capture; `true` forces mock data |
 | `WISPY_SNIFFER_SUDO` | Set `true` to run `core/sniffer.py` via `sudo -n` from the UI (requires passwordless sudo for your venv Python + sniffer path) |
 
 ---
@@ -154,25 +153,22 @@ You should see a list of nearby Wi-Fi networks.
 
 WiSpy uses a **Flask API** plus a **React dashboard**. Packet capture runs in `core/sniffer.py`, which writes to `data/wispy.db`.
 
-### 8.1 Recommended — React UI (development or lab with mock data)
+### 8.1 Recommended — React UI
 
 From the project root:
 
 ```bash
 source .venv/bin/activate
-python mock_data.py          # optional: seed sample telemetry
 python start_wispy.py        # starts Flask :5000 and React :3001
 ```
 
 Open **http://localhost:3001**, click **Initiate scan**, pick a network, then open the monitoring screen.
 
-On **macOS**, mock mode is automatic (`WISPY_MOCK_MODE` defaults to on). On **Kali**, set `WISPY_MOCK_MODE=false` in `.env` for real Wi‑Fi/AP (see §8.2).
-
 > Do **not** use `main.py` with the React UI — it is the legacy CLI launcher only.
 
-### 8.2 Kali Linux — real rogue AP from the React UI
+### 8.2 Kali Linux — rogue AP from the React UI
 
-1. Set in `.env`: `WISPY_MOCK_MODE=false`, correct `WIFI_INTERFACE`, and `OUTBOUND_INTERFACE` (usually `eth0`).
+1. Set in `.env`: correct `WIFI_INTERFACE` and `OUTBOUND_INTERFACE` (usually `eth0`).
 2. Configure **passwordless sudo** for the user running Flask so `core/ap_manager.py` can invoke `sudo hostapd`, `sudo dnsmasq`, `sudo ip`, `sudo iptables`, `sudo iwconfig`, etc. (see `Impl_report.md` §1.3). Paths must match your install.
 3. Start the stack: `python start_wispy.py` (Flask runs as your normal user).
 4. In the UI: **Initiate scan** → select target network. This calls `POST /api/select-network`, which starts `hostapd`, `dnsmasq`, and `core/sniffer.py` as background processes.
@@ -232,8 +228,6 @@ React monitoring UI (`http://localhost:3001`): device cards, DNS table/charts, t
 
 Legacy template UI: `http://localhost:5000` (fewer extension panels).
 
-Seed mock telemetry: `python mock_data.py` or `python mock_data.py --reset`.
-
 ---
 
 ## Step 9 — Privacy and Data Handling Notes
@@ -263,11 +257,11 @@ Operate only on networks and devices you are permitted to monitor.
 | `sudo: hostapd: command not found` | `sudo apt install hostapd -y` |
 | `iw dev` shows no wireless interface | Reload driver: `sudo modprobe -r 8188eu && sudo modprobe 8188eu` |
 | Scanner finds 0 networks | Check driver with `lsmod \| grep rtl` — `rtl8xxxu` must not be listed |
-| Dashboard empty on macOS | Run `python mock_data.py`; confirm `GET /api/status` shows `mock_mode: true` |
-| Real mode: AP up but no DNS/flows | Run sniffer with sudo (§8.2); confirm client uses rogue DNS; check `data/wispy.db` |
+| AP up but no DNS/flows | Run sniffer with sudo (§8.2); confirm client uses rogue DNS; check `data/wispy.db` |
 | `Permission denied` starting AP from UI | Configure sudoers for `hostapd`, `dnsmasq`, `ip`, `iptables`, `iwconfig` (§8.2) |
+| `Operation not permitted` on WiFi scan | Configure passwordless sudo for `airmon-ng`, `iw`, `ip`; grant `CAP_NET_RAW` on venv Python or include it in sudoers for `scapy.sniff()` |
 | Flow host shows IP only | Normal until DNS reply or TLS SNI arrives; wait for HTTPS/DNS activity |
-| TLS / JA3 / mDNS empty | Client must use 443 / mDNS on the rogue LAN; use `mock_data.py` to verify UI |
+| TLS / JA3 / mDNS empty | Client must use 443 / mDNS on the rogue LAN |
 | Plaintext panel empty | Expected on modern HTTPS-only clients; rare HTTP/SMTP cleartext only |
 | Agentic buttons error | Set `GOOGLE_API_KEY` in `.env`; check Flask logs for Gemini model errors |
 | React cannot reach API | Flask must be on `:5000`; frontend proxy expects port 5000 |
