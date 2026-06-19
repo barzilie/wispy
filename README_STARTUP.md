@@ -3,7 +3,7 @@
 ## TL;DR - Just Run This:
 
 ```bash
-python start_wispy.py
+sudo .venv/bin/python start_wispy.py
 ```
 
 Then open: **http://localhost:3001**
@@ -44,7 +44,7 @@ cp .env.example .env
 # Edit .env with your GOOGLE_API_KEY, WIFI_INTERFACE, etc.
 
 # 4. Start the app
-python start_wispy.py
+sudo .venv/bin/python start_wispy.py
 ```
 
 ---

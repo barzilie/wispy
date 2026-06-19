@@ -4,7 +4,7 @@
 
 ### Option 1: One-Command Startup (Recommended)
 ```bash
-python start_wispy.py
+sudo .venv/bin/python start_wispy.py
 ```
 
 This automatically starts both Flask and React!
@@ -14,7 +14,7 @@ This automatically starts both Flask and React!
 **Terminal 1 - Flask Backend:**
 ```bash
 source .venv/bin/activate
-python web/app.py
+sudo .venv/bin/python web/app.py
 ```
 
 **Terminal 2 - React Frontend:**

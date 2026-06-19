@@ -1,18 +1,11 @@
 """
-Gemini API client interface and fallback execution loop.
+Gemini API client interface using the official SDK.
 """
 import google.generativeai as genai
 from config import GOOGLE_API_KEY
 from .context import build_agent_context
 from .prompts.investigate import get_investigate_prompt
 from .prompts.recommend import get_recommend_prompt
-
-_MODEL_CANDIDATES = (
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-)
-
 
 def run_agent(mode="investigate"):
     """Runs the Gemini agent in either 'investigate' or 'recommend' mode."""
@@ -38,29 +31,17 @@ def run_agent(mode="investigate"):
         raise ValueError(f"Invalid mode: {mode}")
 
     genai.configure(api_key=GOOGLE_API_KEY)
-    last_error = None
 
-    for model_name in _MODEL_CANDIDATES:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
+    try:
+        # Strictly targeting flash-lite-latest
+        model = genai.GenerativeModel("gemini-flash-lite-latest")
+        response = model.generate_content(prompt)
+        
+        # The SDK natively handles the payload parsing 
+        if response.text and response.text.strip():
+            return response.text.strip()
             
-            text = getattr(response, "text", None) or ""
-            if not text.strip():
-                # gemini sometimes puts text in candidates not .text
-                parts = getattr(response, "candidates", None) or []
-                if parts:
-                    content = getattr(parts[0], "content", None)
-                    p = getattr(content, "parts", None) if content else None
-                    if p:
-                        text = "".join(getattr(x, "text", "") for x in p)
-                        
-            if text.strip():
-                return text.strip()
-            
-            last_error = "Empty response from Gemini model"
-        except Exception as e:
-            last_error = str(e)
-            continue
-
-    return f"Could not generate agent analysis ({last_error}). Verify GOOGLE_API_KEY and model quotas."
+        return "Could not generate agent analysis (Empty response from Gemini model)."
+        
+    except Exception as e:
+        return f"Could not generate agent analysis ({str(e)}). Verify GOOGLE_API_KEY and model quotas."

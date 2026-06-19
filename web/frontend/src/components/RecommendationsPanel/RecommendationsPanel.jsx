@@ -9,41 +9,43 @@ const RecommendationsPanel = ({
   onGetInvestigation, 
   onGetRecommendations 
 }) => {
-  const [activeTab, setActiveTab] = useState('investigate'); // 'investigate' or 'recommend'
+  // Tracks which content to show in the box below the buttons
+  const [activeView, setActiveView] = useState('investigate');
 
-  const activeContent = activeTab === 'investigate' ? investigation : recommendations;
-  const triggerAction = activeTab === 'investigate' ? onGetInvestigation : onGetRecommendations;
-  const buttonText = activeTab === 'investigate' ? 'Investigate Session' : 'Suggest Next Steps';
-  const boxHeader = activeTab === 'investigate' ? '[ SESSION COGNITIVE ANALYSIS ]' : '[ ATTACK VECTOR ANALYSIS ]';
+  const handleInvestigateClick = () => {
+    setActiveView('investigate');
+    onGetInvestigation();
+  };
+
+  const handleRecommendClick = () => {
+    setActiveView('recommend');
+    onGetRecommendations();
+  };
+
+  const activeContent = activeView === 'investigate' ? investigation : recommendations;
+  const boxHeader = activeView === 'investigate' ? '[ SESSION COGNITIVE ANALYSIS ]' : '[ ATTACK VECTOR ANALYSIS ]';
 
   return (
     <section className="section">
       <h2>🤖 Agentic AI analysis</h2>
       
-      <div className="agentic-tabs" style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem' }}>
+      <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem' }}>
         <button
-          onClick={() => setActiveTab('investigate')}
-          className={`recommend-button ${activeTab === 'investigate' ? 'tab-active' : 'tab-inactive'}`}
-          style={{ padding: '0.75rem 1.5rem', fontSize: '0.95rem' }}
+          onClick={handleInvestigateClick}
+          disabled={loading}
+          className={`recommend-button ${activeView === 'investigate' ? 'tab-active' : 'tab-inactive'}`}
         >
-          Session Investigation
+          {loading && activeView === 'investigate' ? 'Analyzing...' : 'Investigate Session'}
         </button>
+        
         <button
-          onClick={() => setActiveTab('recommend')}
-          className={`recommend-button ${activeTab === 'recommend' ? 'tab-active' : 'tab-inactive'}`}
-          style={{ padding: '0.75rem 1.5rem', fontSize: '0.95rem' }}
+          onClick={handleRecommendClick}
+          disabled={loading}
+          className={`recommend-button ${activeView === 'recommend' ? 'tab-active' : 'tab-inactive'}`}
         >
-          Attack Suggestions
+          {loading && activeView === 'recommend' ? 'Analyzing...' : 'Suggest Next Steps'}
         </button>
       </div>
-
-      <button
-        onClick={triggerAction}
-        disabled={loading}
-        className="recommend-button"
-      >
-        {loading ? 'Analyzing...' : buttonText}
-      </button>
 
       {error && (
         <div className="recommendations-error" role="alert">
