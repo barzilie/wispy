@@ -6,19 +6,21 @@ const POLL_DATA_URL = '/api/data?include_dns=0&include_patterns=0';
 
 const applyTelemetry = (dataJson, setters) => {
   setters.setDevices(dataJson.devices || []);
-  setters.setTlsSni(dataJson.tls_sni || []);
-  setters.setJa3Rows(dataJson.ja3 || []);
-  setters.setMdnsRows(dataJson.mdns || []);
-  setters.setFlows(dataJson.flows || []);
+  
+  // Hard cap the telemetry arrays to prevent React render freezing
+  setters.setTlsSni((dataJson.tls_sni || []).slice(0, 100));
+  setters.setJa3Rows((dataJson.ja3 || []).slice(0, 100));
+  setters.setMdnsRows((dataJson.mdns || []).slice(0, 100));
+  setters.setFlows((dataJson.flows || []).slice(0, 100));
   setters.setFlowsTotal(dataJson.flows_total ?? 0);
-  setters.setPlaintextEvents(dataJson.plaintext || []);
+  setters.setPlaintextEvents((dataJson.plaintext || []).slice(0, 50));
   setters.setPlaintextTotal(dataJson.plaintext_total ?? 0);
 };
 
 /**
  * Live devices + DNS with incremental updates and cursor pagination for infinite scroll.
  */
-const useWispyData = (refreshInterval = 2000) => {
+const useWispyData = (refreshInterval = 5000) => { // Updated to 5 seconds
   const [devices, setDevices] = useState([]);
   const [dnsQueries, setDnsQueries] = useState([]);
   const [dnsTotal, setDnsTotal] = useState(0);
@@ -49,6 +51,7 @@ const useWispyData = (refreshInterval = 2000) => {
   useEffect(() => {
     let cancelled = false;
     let timeoutId;
+    const abortController = new AbortController();
 
     const syncDnsRows = (rows, total) => {
       setDnsQueries(rows);
@@ -63,33 +66,39 @@ const useWispyData = (refreshInterval = 2000) => {
 
     const refreshDns = async () => {
       const mid = maxIdRef.current;
-      if (mid == null) {
-        const dnsRes = await fetch(`/api/dns?limit=${PAGE_SIZE}`);
-        if (!dnsRes.ok || cancelled) return false;
-        const dj = await dnsRes.json();
-        const rows = dj.dns || [];
-        if (cancelled || !rows.length) return false;
-        syncDnsRows(rows, dj.total ?? 0);
+      try {
+        if (mid == null) {
+          const dnsRes = await fetch(`/api/dns?limit=${PAGE_SIZE}`, { signal: abortController.signal });
+          if (!dnsRes.ok || cancelled) return false;
+          const dj = await dnsRes.json();
+          const rows = dj.dns || [];
+          if (cancelled || !rows.length) return false;
+          syncDnsRows(rows, dj.total ?? 0);
+          return true;
+        }
+
+        const incRes = await fetch(`/api/dns?after_id=${mid}&limit=500`, { signal: abortController.signal });
+        if (!incRes.ok || cancelled) return false;
+        const incJson = await incRes.json();
+        const fresh = incJson.dns || [];
+        if (!fresh.length) return false;
+
+        setDnsQueries((prev) => {
+          const byId = new Map(prev.map((r) => [r.id, r]));
+          fresh.forEach((r) => byId.set(r.id, r));
+          const next = Array.from(byId.values()).sort((a, b) => b.id - a.id).slice(0, 1000);
+          maxIdRef.current = next.length ? next[0].id : mid;
+          return next;
+        });
+        
+        if (incJson.total != null) {
+          setDnsTotal(incJson.total);
+        }
         return true;
+      } catch (err) {
+        if (err.name === 'AbortError') return false;
+        throw err;
       }
-
-      const incRes = await fetch(`/api/dns?after_id=${mid}&limit=500`);
-      if (!incRes.ok || cancelled) return false;
-      const incJson = await incRes.json();
-      const fresh = incJson.dns || [];
-      if (!fresh.length) return false;
-
-      setDnsQueries((prev) => {
-        const byId = new Map(prev.map((r) => [r.id, r]));
-        fresh.forEach((r) => byId.set(r.id, r));
-        const next = Array.from(byId.values()).sort((a, b) => b.id - a.id).slice(0, 1000);
-        maxIdRef.current = next.length ? next[0].id : mid;
-        return next;
-      });
-      if (incJson.total != null) {
-        setDnsTotal(incJson.total);
-      }
-      return true;
     };
 
     const loadInitial = async () => {
@@ -97,7 +106,7 @@ const useWispyData = (refreshInterval = 2000) => {
       let dataOk = false;
 
       try {
-        const dnsRes = await fetch(`/api/dns?limit=${PAGE_SIZE}`);
+        const dnsRes = await fetch(`/api/dns?limit=${PAGE_SIZE}`, { signal: abortController.signal });
         if (dnsRes.ok) {
           const dnsJson = await dnsRes.json();
           if (!cancelled) {
@@ -106,11 +115,11 @@ const useWispyData = (refreshInterval = 2000) => {
           }
         }
       } catch (err) {
-        console.error('Error fetching DNS:', err);
+        if (err.name !== 'AbortError') console.error('Error fetching DNS:', err);
       }
 
       try {
-        const dataRes = await fetch(DATA_URL);
+        const dataRes = await fetch(DATA_URL, { signal: abortController.signal });
         if (dataRes.ok) {
           const dataJson = await dataRes.json();
           if (!cancelled) {
@@ -122,7 +131,7 @@ const useWispyData = (refreshInterval = 2000) => {
           }
         }
       } catch (err) {
-        console.error('Error fetching telemetry:', err);
+        if (err.name !== 'AbortError') console.error('Error fetching telemetry:', err);
       }
 
       if (!cancelled) {
@@ -140,7 +149,7 @@ const useWispyData = (refreshInterval = 2000) => {
       let telemetryOk = false;
 
       try {
-        const dataRes = await fetch(POLL_DATA_URL);
+        const dataRes = await fetch(POLL_DATA_URL, { signal: abortController.signal });
         if (dataRes.ok) {
           const dataJson = await dataRes.json();
           if (!cancelled) {
@@ -150,7 +159,7 @@ const useWispyData = (refreshInterval = 2000) => {
           }
         }
       } catch (err) {
-        console.error('Error polling telemetry:', err);
+        if (err.name !== 'AbortError') console.error('Error polling telemetry:', err);
       }
 
       try {
@@ -161,7 +170,7 @@ const useWispyData = (refreshInterval = 2000) => {
           setError('Failed to refresh monitoring data');
         }
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && err.name !== 'AbortError') {
           console.error('Error polling DNS:', err);
           setError(err.message);
         }
@@ -173,13 +182,17 @@ const useWispyData = (refreshInterval = 2000) => {
       }
     };
 
-    // Kick off initial setup and start loop
-    loadInitial();
-    pollMonitoringData();
+    // Kick off initial setup, THEN start the background loop
+    loadInitial().then(() => {
+      if (!cancelled) {
+        timeoutId = setTimeout(pollMonitoringData, refreshInterval);
+      }
+    });
 
     return () => {
       cancelled = true;
       clearTimeout(timeoutId);
+      abortController.abort(); // Cancel any pending fetches
     };
   }, [refreshInterval]);
 
