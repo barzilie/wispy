@@ -19,12 +19,14 @@ _TELEMETRY_TABLES = frozenset({
 })
 
 
-
 def _connect():
     """Opens a connection to the SQLite database, creating the data directory if needed."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    return sqlite3.connect(DB_PATH)
-
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    
+    return conn
 
 def init_db():
     """Creates and migrates telemetry tables. Safe to call on every startup."""

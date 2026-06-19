@@ -45,8 +45,10 @@ const useWispyData = (refreshInterval = 2000) => {
     setPlaintextTotal,
   };
 
+  // Effect 1: Handles Initial Load & Background Polling Loop
   useEffect(() => {
     let cancelled = false;
+    let timeoutId;
 
     const syncDnsRows = (rows, total) => {
       setDnsQueries(rows);
@@ -80,7 +82,7 @@ const useWispyData = (refreshInterval = 2000) => {
       setDnsQueries((prev) => {
         const byId = new Map(prev.map((r) => [r.id, r]));
         fresh.forEach((r) => byId.set(r.id, r));
-        const next = Array.from(byId.values()).sort((a, b) => b.id - a.id);
+        const next = Array.from(byId.values()).sort((a, b) => b.id - a.id).slice(0, 1000);
         maxIdRef.current = next.length ? next[0].id : mid;
         return next;
       });
@@ -132,9 +134,9 @@ const useWispyData = (refreshInterval = 2000) => {
       }
     };
 
-    loadInitial();
+    const pollMonitoringData = async () => {
+      if (cancelled) return;
 
-    const interval = setInterval(async () => {
       let telemetryOk = false;
 
       try {
@@ -164,20 +166,31 @@ const useWispyData = (refreshInterval = 2000) => {
           setError(err.message);
         }
       }
-    }, refreshInterval);
+
+      // Schedule the next poll ONLY after this one completes
+      if (!cancelled) {
+        timeoutId = setTimeout(pollMonitoringData, refreshInterval);
+      }
+    };
+
+    // Kick off initial setup and start loop
+    loadInitial();
+    pollMonitoringData();
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      clearTimeout(timeoutId);
     };
   }, [refreshInterval]);
 
+  // Effect 2: Check for exhaustion state
   useEffect(() => {
     if (dnsTotal > 0 && dnsQueries.length >= dnsTotal) {
       setOlderExhausted(true);
     }
   }, [dnsQueries.length, dnsTotal]);
 
+  // Infinite Scroll Pagination Trigger
   const loadMoreDns = useCallback(async () => {
     if (loadingMoreDns || olderExhausted) return;
     const oldest = dnsQueries.length ? dnsQueries[dnsQueries.length - 1].id : null;
