@@ -4,6 +4,7 @@ import hashlib
 import socket
 import time
 from datetime import datetime
+import traceback
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from scapy.all import sniff, DNSQR, DNSRR, DNS, Ether, IP, DHCP, BOOTP, UDP, TCP, Raw
@@ -367,7 +368,7 @@ def _track_packet_flow(packet):
         
     flow_key = (client_mac, proto, client_ip, server_ip, server_port)
     now_epoch = time.time()
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = datetime.now(datetime.timezone.utc).isoformat()
     
     flow_buf = _active_flows
     if flow_key not in flow_buf:
@@ -543,22 +544,29 @@ def _handle_plaintext(packet):
 
 
 def process_packet(packet):
-    if packet.haslayer(DHCP):
-        _handle_dhcp(packet)
-    if packet.haslayer(DNS):
-        _handle_mdns(packet)
-        _handle_dns(packet)
-    if packet.haslayer(TCP):
-        _handle_tls(packet)
-        _handle_plaintext(packet)
-        
-    # flow stats
-    if packet.haslayer(IP):
-        _track_packet_flow(packet)
-        
-    # flush to sqlite every few sec
-    if time.time() - _last_flow_flush > FLOW_FLUSH_INTERVAL_SEC:
-        _flush_flows_to_db()
+    try:
+        if packet.haslayer(DHCP):
+            _handle_dhcp(packet)
+        if packet.haslayer(DNS):
+            _handle_mdns(packet)
+            _handle_dns(packet)
+        if packet.haslayer(TCP):
+            _handle_tls(packet)
+            _handle_plaintext(packet)
+            
+        # flow stats
+        if packet.haslayer(IP):
+            _track_packet_flow(packet)
+            
+        # flush to sqlite every few sec
+        global _last_flow_flush
+        if time.time() - _last_flow_flush > FLOW_FLUSH_INTERVAL_SEC:
+            _flush_flows_to_db()
+
+    except Exception as e:
+        # Instead of crashing Scapy, we catch the error, print it, and move to the next packet!
+        print(f"\n[!] Error parsing packet: {e}")
+        traceback.print_exc()
 
 
 def start():

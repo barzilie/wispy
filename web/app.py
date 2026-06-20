@@ -311,14 +311,7 @@ def _assert_process_running(proc, name, grace_sec=0.4):
     """Raises if a subprocess exits immediately after start."""
     time.sleep(grace_sec)
     if proc.poll() is not None:
-        err = ""
-        if proc.stderr:
-            try:
-                err = proc.stderr.read().decode(errors="replace").strip()
-            except Exception:
-                pass
-        detail = f": {err}" if err else ""
-        raise RuntimeError(f"{name} exited immediately (code {proc.returncode}){detail}")
+        raise RuntimeError(f"{name} exited immediately (code {proc.returncode}). Check the terminal logs above.")
 
 
 def _start_sniffer_process(project_root, sniffer_path):
@@ -327,10 +320,13 @@ def _start_sniffer_process(project_root, sniffer_path):
     cmd = [sys.executable, sniffer_path]
     if use_sudo:
         cmd = ["sudo", "-n"] + cmd
+        
     proc = subprocess.Popen(
         cmd,
         cwd=project_root,
-        stderr=subprocess.PIPE,
+        # Send output directly to the terminal running the Flask app
+        stdout=sys.stdout, 
+        stderr=sys.stderr, 
     )
     _assert_process_running(proc, "Packet sniffer")
     return proc, use_sudo
