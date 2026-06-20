@@ -5,6 +5,7 @@ import socket
 import time
 from datetime import datetime
 import traceback
+from mac_vendor_lookup import MacLookup
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from scapy.all import sniff, DNSQR, DNSRR, DNS, Ether, IP, DHCP, BOOTP, UDP, TCP, Raw
@@ -54,6 +55,35 @@ def _should_emit(cache, key, window_sec):
         return False
     cache[key] = now
     return True
+
+def _extract_friendly_name_from_mdns(raw_name):
+    if not raw_name:
+        return None
+    clean = raw_name.replace(".local", "")
+    if "._" in clean:
+        clean = clean.split("._")[0]
+    return clean
+
+def _guess_os_from_opt55(opt55_str):
+    """
+    Basic DHCP Fingerprinting based on the Parameter Request List (Option 55).
+    """
+    if not opt55_str:
+        return None
+    
+    # Android devices typically start with 1, 3, 6, 15, 26, 28, 51...
+    if opt55_str.startswith("1,3,6,15,26,28,51"):
+        return "Android"
+    
+    # Apple iOS / macOS typically start with 1, 3, 6, 15, 119, 252...
+    elif opt55_str.startswith("1,3,6,15,119,252"):
+        return "Apple (iOS/macOS)"
+    
+    # Windows typically requests 31, 33, 43, 44, 46, 47
+    elif "31,33,43,44,46,47" in opt55_str or opt55_str.startswith("1,3,6,15,31"):
+        return "Windows"
+        
+    return None
 
 
 def _dns_rr_to_ip(rr_type, rr_data):
@@ -129,7 +159,6 @@ def _handle_dns(packet):
                     add_dns_mapping(mac, ip_str, rr_name)
             i += 1
 
-
 def _handle_dhcp(packet):
     if not (packet.haslayer(DHCP) and packet.haslayer(BOOTP) and packet.haslayer(Ether)):
         return
@@ -137,6 +166,7 @@ def _handle_dhcp(packet):
     mac = packet[Ether].src
     hostname = None
     dhcp_params = None
+    
     for opt in packet[DHCP].options:
         if isinstance(opt, tuple) and opt[0] == 'hostname':
             raw = opt[1]
@@ -157,9 +187,18 @@ def _handle_dhcp(packet):
     if ip == '0.0.0.0':
         ip = None
 
-    upsert_device(mac, ip=ip, hostname=hostname, dhcp_params=dhcp_params)
-    print(f"[DHCP] {mac} -> hostname={hostname} opt55={dhcp_params}")
+    # Guess the OS using the DHCP Option 55 footprint
+    os_guess = _guess_os_from_opt55(dhcp_params)
 
+    # Pass the os_guess into the database!
+    upsert_device(mac, ip=ip, hostname=hostname, dhcp_params=dhcp_params, os_guess=os_guess)
+    print(f"[DHCP] {mac} -> hostname={hostname} opt55={dhcp_params} os_guess={os_guess}")
+
+    try:
+        vendor_name = MacLookup().lookup(mac)
+        upsert_device(mac, vendor=vendor_name)
+    except:
+        pass
 
 def _extract_mdns_name(packet):
     dns = packet[DNS]
@@ -182,7 +221,6 @@ def _extract_mdns_name(packet):
             return name
     return None
 
-
 def _handle_mdns(packet):
     if not (packet.haslayer(UDP) and packet.haslayer(DNS) and packet.haslayer(Ether)):
         return
@@ -202,9 +240,15 @@ def _handle_mdns(packet):
     mac = packet[Ether].src
     if not _should_emit(_last_mdns_seen, (mac, name), MDNS_DEDUP_WINDOW_SEC):
         return
+        
     insert_mdns(mac, name)
     print(f"[mDNS] {mac} -> {name}")
-
+    
+    # --- NEW CODE BELOW ---
+    friendly_name = _extract_friendly_name_from_mdns(name)
+    if friendly_name:
+        # Update the master devices table with the real hostname!
+        upsert_device(mac, hostname=friendly_name)
 
 def _ja3_from_client_hello(client_hello):
     version = str(getattr(client_hello, "version", ""))

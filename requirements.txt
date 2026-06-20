@@ -2,3 +2,5 @@ scapy
 flask
 google-generativeai
 python-dotenv
+mac-vendor-lookup
+psycopg2
