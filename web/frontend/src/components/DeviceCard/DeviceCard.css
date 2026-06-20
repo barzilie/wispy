@@ -185,3 +185,53 @@
 .device-ja3-list li {
   font-size: 0.72rem;
 }
+
+/* --- ACCORDION STYLES --- */
+.device-accordion {
+  margin-bottom: 0.25rem;
+}
+
+.device-accordion-summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none; /* Hides default triangle in Firefox */
+  display: flex;
+  align-items: center;
+  padding: 0.25rem 0;
+  transition: opacity 0.2s ease;
+}
+
+/* Hides default triangle in WebKit (Chrome/Safari) */
+.device-accordion-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Custom interactive arrow */
+.device-accordion-summary::before {
+  content: '►';
+  font-size: 0.7rem;
+  margin-right: 0.5rem;
+  color: inherit; 
+  transition: transform 0.2s ease;
+}
+
+/* Rotate the arrow downward when the accordion opens */
+.device-accordion[open] > .device-accordion-summary::before {
+  transform: rotate(90deg);
+}
+
+.device-accordion-summary:hover {
+  opacity: 0.7;
+}
+
+/* Ensure your existing label renders nicely next to the arrow */
+.device-accordion-summary .device-dns-preview-label {
+  margin: 0;
+  display: inline-block;
+}
+
+/* Indent the lists slightly when expanded */
+.device-accordion-content {
+  padding-top: 0.5rem;
+  padding-left: 1.25rem;
+}

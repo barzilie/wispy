@@ -3,9 +3,10 @@ import sys
 import hashlib
 import socket
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 import traceback
-from mac_vendor_lookup import MacLookup
+import queue
+import threading
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from scapy.all import sniff, DNSQR, DNSRR, DNS, Ether, IP, DHCP, BOOTP, UDP, TCP, Raw
@@ -22,7 +23,7 @@ from analysis.storage import (
 )
 from analysis.dns_filters import is_ad_tracking_domain
 from analysis.correlation import add_dns_mapping, resolve_ip_to_host
-from core.fingerprint import fingerprint
+from core.fingerprint import lookup_vendor, OSResolver
 try:
     from scapy.layers.tls.all import TLS, TLSClientHello  # type: ignore
 except Exception:
@@ -47,6 +48,12 @@ _active_flows = {}
 _last_flow_flush = time.time()
 FLOW_FLUSH_INTERVAL_SEC = 5
 
+_fingerprinted_macs = set()
+_http_fingerprinted_macs = set()
+
+db_queue = queue.Queue()
+_mac_os_confidence = {}  # mac -> int (100 = DHCP, 50 = TTL)
+
 
 def _should_emit(cache, key, window_sec):
     now = time.time()
@@ -63,27 +70,6 @@ def _extract_friendly_name_from_mdns(raw_name):
     if "._" in clean:
         clean = clean.split("._")[0]
     return clean
-
-def _guess_os_from_opt55(opt55_str):
-    """
-    Basic DHCP Fingerprinting based on the Parameter Request List (Option 55).
-    """
-    if not opt55_str:
-        return None
-    
-    # Android devices typically start with 1, 3, 6, 15, 26, 28, 51...
-    if opt55_str.startswith("1,3,6,15,26,28,51"):
-        return "Android"
-    
-    # Apple iOS / macOS typically start with 1, 3, 6, 15, 119, 252...
-    elif opt55_str.startswith("1,3,6,15,119,252"):
-        return "Apple (iOS/macOS)"
-    
-    # Windows typically requests 31, 33, 43, 44, 46, 47
-    elif "31,33,43,44,46,47" in opt55_str or opt55_str.startswith("1,3,6,15,31"):
-        return "Windows"
-        
-    return None
 
 
 def _dns_rr_to_ip(rr_type, rr_data):
@@ -117,47 +103,92 @@ def _normalize_name(raw_name):
     return str(raw_name).rstrip(".")
 
 
+def background_db_worker():
+    """Consumes signals and maintains device state with confidence logic."""
+    while True:
+        task = db_queue.get()
+        if task is None: break
+        
+        try:
+            if task['action'] == 'fingerprint':
+                mac = task['mac']
+                sig_type = task['signal_type']
+                sig_val = task['signal_value']
+                
+                # Fetch current known state
+                current_conf = _mac_os_confidence.get(mac, 0)
+                
+                # 1. Evaluate if this signal improves our knowledge
+                new_os, new_conf = OSResolver.evaluate(sig_type, sig_val, current_conf)
+                
+                # 2. Extract context
+                ip = task.get('ip')
+                hostname = task.get('hostname')
+                
+                # 3. Perform update
+                vendor = lookup_vendor(mac)
+                if new_os:
+                    _mac_os_confidence[mac] = new_conf
+                    upsert_device(mac, ip=ip, hostname=hostname, vendor=vendor, os_guess=new_os)
+                else:
+                    upsert_device(mac, ip=ip, hostname=hostname, vendor=vendor)
+
+            elif task['action'] == 'insert':
+                task['func'](*task.get('args', []), **task.get('kwargs', {}))
+                
+        except Exception as e:
+            traceback.print_exc()
+        finally:
+            db_queue.task_done()
+
+    
 def _handle_dns(packet):
     if not packet.haslayer(DNS):
         return
     dns = packet[DNS]
-
     if dns.qr == 0:  # query
         if not packet.haslayer(DNSQR):
             return
+        
         mac = packet[Ether].src if packet.haslayer(Ether) else "00:00:00:00:00:00"
-        ip  = packet[IP].src if packet.haslayer(IP) else None
+        ip = packet[IP].src if packet.haslayer(IP) else None
         ttl = packet[IP].ttl if packet.haslayer(IP) else None
         domain = packet[DNSQR].qname.decode(errors='ignore').rstrip('.')
 
-        if not domain or domain.endswith('.local'):
-            return
-        if is_ad_tracking_domain(domain):
+        if not domain or domain.endswith('.local') or is_ad_tracking_domain(domain):
             return
 
-        dev_fp = fingerprint(mac, ttl)
-        upsert_device(mac, ip=ip, vendor=dev_fp["vendor"], os_guess=dev_fp["os_guess"])
-        insert_dns(mac, domain)
-        print(f"[DNS] {mac} -> {domain}")
-        
-    elif dns.qr == 1:  # answer
+        # Push DNS logic
+        db_queue.put({'action': 'insert', 'func': insert_dns, 'args': [mac, domain]})
+
+        # Push TTL Fingerprint Signal (only if we don't have high confidence yet)
+        if mac not in _fingerprinted_macs:
+            db_queue.put({
+                'action': 'fingerprint',
+                'mac': mac,
+                'signal_type': 'ttl',
+                'signal_value': ttl,
+                'ip': ip
+            })
+            _fingerprinted_macs.add(mac)
+            print(f"[DNS] {mac} -> {domain}")
+
+    elif dns.qr == 1:  # Answer section
         mac = packet[Ether].dst if packet.haslayer(Ether) else None
-        if not mac:
-            return
-        # pull A/AAAA records out of the response
+        if not mac: return
+        
         i = 1
         while True:
             rr = packet.getlayer(DNSRR, i)
-            if not rr:
-                break
-            rr_type = rr.type
-            rr_name = _normalize_name(rr.rrname)
-            rr_data = rr.rdata
-            if rr_type in (1, 28) and rr_name and rr_data:
-                ip_str = _dns_rr_to_ip(rr_type, rr_data)
-                if ip_str:
-                    add_dns_mapping(mac, ip_str, rr_name)
-            i += 1
+            if not rr: break
+            
+            # Use your function here!
+            ip_str = _dns_rr_to_ip(rr.type, rr.rdata)
+            if ip_str:
+                rr_name = _normalize_name(rr.rrname)
+                # This maps the domain to the IP, which is vital for your flow tracking
+                db_queue.put({'action': 'insert', 'func': add_dns_mapping, 'args': [mac, ip_str, rr_name]})
+            i += 1     
 
 def _handle_dhcp(packet):
     if not (packet.haslayer(DHCP) and packet.haslayer(BOOTP) and packet.haslayer(Ether)):
@@ -167,38 +198,34 @@ def _handle_dhcp(packet):
     hostname = None
     dhcp_params = None
     
+    # Extract DHCP options
     for opt in packet[DHCP].options:
-        if isinstance(opt, tuple) and opt[0] == 'hostname':
-            raw = opt[1]
-            hostname = raw.decode(errors='ignore') if isinstance(raw, bytes) else raw
-        if isinstance(opt, tuple) and opt[0] == 'param_req_list':
-            raw = opt[1]
-            if isinstance(raw, bytes):
-                dhcp_params = ",".join(str(v) for v in raw)
-            elif isinstance(raw, (list, tuple)):
-                dhcp_params = ",".join(str(v) for v in raw)
-            else:
-                dhcp_params = str(raw)
+        if isinstance(opt, tuple):
+            if opt[0] == 'hostname':
+                hostname = opt[1].decode(errors='ignore') if isinstance(opt[1], bytes) else opt[1]
+            elif opt[0] == 'param_req_list':
+                raw = opt[1]
+                dhcp_params = ",".join(str(v) for v in raw) if isinstance(raw, (list, tuple, bytes)) else str(raw)
 
     if not hostname and not dhcp_params:
         return
 
     ip = packet[BOOTP].ciaddr or None
-    if ip == '0.0.0.0':
-        ip = None
+    
+    # Push Fingerprint Signal
+    if dhcp_params:
+        db_queue.put({
+            'action': 'fingerprint',
+            'mac': mac,
+            'signal_type': 'dhcp_55',
+            'signal_value': dhcp_params,
+            'ip': ip,
+            'hostname': hostname
+        })
 
-    # Guess the OS using the DHCP Option 55 footprint
-    os_guess = _guess_os_from_opt55(dhcp_params)
+    print(f"[DHCP] {mac} -> host={hostname}")
+    _fingerprinted_macs.add(mac)
 
-    # Pass the os_guess into the database!
-    upsert_device(mac, ip=ip, hostname=hostname, dhcp_params=dhcp_params, os_guess=os_guess)
-    print(f"[DHCP] {mac} -> hostname={hostname} opt55={dhcp_params} os_guess={os_guess}")
-
-    try:
-        vendor_name = MacLookup().lookup(mac)
-        upsert_device(mac, vendor=vendor_name)
-    except:
-        pass
 
 def _extract_mdns_name(packet):
     dns = packet[DNS]
@@ -412,7 +439,7 @@ def _track_packet_flow(packet):
         
     flow_key = (client_mac, proto, client_ip, server_ip, server_port)
     now_epoch = time.time()
-    now_iso = datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
     
     flow_buf = _active_flows
     if flow_key not in flow_buf:
@@ -482,8 +509,9 @@ def _flush_flows_to_db():
     _last_flow_flush = now_epoch
 
 
-def _parse_http_payload(payload):
+def _parse_http_payload(payload, client_mac):
     try:
+        
         text = payload.decode(errors='ignore')
         lines = text.split('\r\n')
         if not lines:
@@ -494,15 +522,23 @@ def _parse_http_payload(payload):
             return None
         
         method = parts[0]
-        
         host = "unknown"
+        user_agent = None  # New field
+        
         for line in lines[1:]:
-            if line.lower().startswith('host:'):
+            line_lower = line.lower()
+            if line_lower.startswith('host:'):
                 host = line[5:].strip()
-                break
+            elif line_lower.startswith('user-agent:'):
+                user_agent = line[11:].strip()
+        if user_agent and client_mac not in _http_fingerprinted_macs:
+            _http_fingerprinted_macs.add(client_mac)
+            db_queue.put({'action': 'fingerprint','mac': client_mac,'signal_type': 'http_ua','signal_value': user_agent})
+
         return {
             'host': host,
             'method': method,
+            'user_agent': user_agent,
             'summary': req_line
         }
     except Exception:
@@ -569,7 +605,7 @@ def _handle_plaintext(packet):
         return
         
     if sport == 80 or dport == 80:
-        parsed = _parse_http_payload(payload)
+        parsed = _parse_http_payload(payload, client_mac)
         if parsed:
             key = (client_mac, "http", parsed['host'], parsed['method'], parsed['summary'])
             if _should_emit(_last_plaintext_seen, key, HTTP_SMTP_DEDUP_WINDOW_SEC):
@@ -615,6 +651,7 @@ def process_packet(packet):
 
 def start():
     init_db()
+    threading.Thread(target=background_db_worker, daemon=True).start()
     print(f"[*] sniffing on {INTERFACE}")
     print("[*] watching dns/mdns/dhcp/tls/http/smtp - ctrl+c to quit\n")
     sniff(

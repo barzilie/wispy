@@ -7,15 +7,23 @@
   margin: 0 0 0.5rem 0;
 }
 
-.telemetry-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.25rem;
+/* --- NEW FLEX LAYOUT FOR 2 LINES --- */
+.telemetry-row {
+  display: flex;
+  gap: 1.25rem; /* Kept your original 1.25rem gap */
+  margin-bottom: 1.25rem; 
+  width: 100%;
 }
 
+.telemetry-col {
+  flex: 1;
+  min-width: 0; /* Crucial: prevents data-heavy tables from breaking the layout */
+}
+
+/* Stacks the columns on smaller screens, keeping your original 1200px breakpoint */
 @media (max-width: 1200px) {
-  .telemetry-grid {
-    grid-template-columns: 1fr;
+  .telemetry-row {
+    flex-direction: column;
   }
 }
 

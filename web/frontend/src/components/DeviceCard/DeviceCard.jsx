@@ -26,21 +26,22 @@ const DeviceCard = ({ device, dnsQueries = [], tlsSni = [], ja3Rows = [], mdnsRo
       if (!d || seen.has(d)) continue;
       seen.add(d);
       ordered.push(d);
-      if (ordered.length >= 8) break;
+      // Increased to 50 since it's hidden inside an accordion now!
+      if (ordered.length >= 50) break;
     }
     return ordered;
   }, [dnsQueries, device.mac]);
 
   const previewSni = useMemo(
-    () => takeUnique(tlsSni, device.mac, 'sni', 4),
+    () => takeUnique(tlsSni, device.mac, 'sni', 50),
     [tlsSni, device.mac],
   );
   const previewJa3 = useMemo(
-    () => takeUnique(ja3Rows, device.mac, 'ja3_hash', 3),
+    () => takeUnique(ja3Rows, device.mac, 'ja3_hash', 50),
     [ja3Rows, device.mac],
   );
   const previewMdns = useMemo(
-    () => takeUnique(mdnsRows, device.mac, 'service_name', 4),
+    () => takeUnique(mdnsRows, device.mac, 'service_name', 50),
     [mdnsRows, device.mac],
   );
 
@@ -57,6 +58,7 @@ const DeviceCard = ({ device, dnsQueries = [], tlsSni = [], ja3Rows = [], mdnsRo
         <span className="device-name">{device.hostname || 'Unknown Device'}</span>
         <span className="device-os">{device.os_guess}</span>
       </div>
+      
       <div className="device-info">
         <p><strong>MAC</strong> {device.mac}</p>
         <p><strong>IP</strong> {device.ip}</p>
@@ -75,6 +77,7 @@ const DeviceCard = ({ device, dnsQueries = [], tlsSni = [], ja3Rows = [], mdnsRo
           </p>
         ) : null}
       </div>
+
       {patterns.length > 0 && (
         <div className="device-patterns">
           <span className="device-dns-preview-label">Usage patterns</span>
@@ -91,50 +94,82 @@ const DeviceCard = ({ device, dnsQueries = [], tlsSni = [], ja3Rows = [], mdnsRo
           </ul>
         </div>
       )}
+
+      {/* --- RECENT DNS ACCORDION --- */}
       <div className="device-dns-preview">
-        <span className="device-dns-preview-label">Recent DNS</span>
-        {previewDomains.length ? (
-          <ul className="device-dns-preview-list">
-            {previewDomains.map((d) => (
-              <li key={d} title={d}>{d}</li>
-            ))}
-          </ul>
-        ) : (
-          <p className="device-dns-preview-empty">No queries for this MAC in the loaded log.</p>
-        )}
+        <details className="device-accordion">
+          <summary className="device-accordion-summary">
+            <span className="device-dns-preview-label">Recent DNS ({previewDomains.length})</span>
+          </summary>
+          <div className="device-accordion-content">
+            {previewDomains.length ? (
+              <ul className="device-dns-preview-list">
+                {previewDomains.map((d) => (
+                  <li key={d} title={d}>{d}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="device-dns-preview-empty">No queries for this MAC in the loaded log.</p>
+            )}
+          </div>
+        </details>
       </div>
+
+      {/* --- META TELEMETRY ACCORDIONS --- */}
       {(previewSni.length > 0 || previewJa3.length > 0 || previewMdns.length > 0) && (
         <div className="device-meta-telemetry">
+          
           {previewSni.length > 0 && (
             <div className="device-meta-block">
-              <span className="device-dns-preview-label">TLS SNI</span>
-              <ul className="device-dns-preview-list">
-                {previewSni.map((s) => (
-                  <li key={s} title={s}>{s}</li>
-                ))}
-              </ul>
+              <details className="device-accordion">
+                <summary className="device-accordion-summary">
+                  <span className="device-dns-preview-label">TLS SNI ({previewSni.length})</span>
+                </summary>
+                <div className="device-accordion-content">
+                  <ul className="device-dns-preview-list">
+                    {previewSni.map((s) => (
+                      <li key={s} title={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
             </div>
           )}
+
           {previewJa3.length > 0 && (
             <div className="device-meta-block">
-              <span className="device-dns-preview-label">JA3</span>
-              <ul className="device-dns-preview-list device-ja3-list">
-                {previewJa3.map((h) => (
-                  <li key={h} title={h}>{h}</li>
-                ))}
-              </ul>
+              <details className="device-accordion">
+                <summary className="device-accordion-summary">
+                  <span className="device-dns-preview-label">JA3 ({previewJa3.length})</span>
+                </summary>
+                <div className="device-accordion-content">
+                  <ul className="device-dns-preview-list device-ja3-list">
+                    {previewJa3.map((h) => (
+                      <li key={h} title={h}>{h}</li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
             </div>
           )}
+
           {previewMdns.length > 0 && (
             <div className="device-meta-block">
-              <span className="device-dns-preview-label">mDNS</span>
-              <ul className="device-dns-preview-list">
-                {previewMdns.map((m) => (
-                  <li key={m} title={m}>{m}</li>
-                ))}
-              </ul>
+              <details className="device-accordion">
+                <summary className="device-accordion-summary">
+                  <span className="device-dns-preview-label">mDNS ({previewMdns.length})</span>
+                </summary>
+                <div className="device-accordion-content">
+                  <ul className="device-dns-preview-list">
+                    {previewMdns.map((m) => (
+                      <li key={m} title={m}>{m}</li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
             </div>
           )}
+
         </div>
       )}
     </div>

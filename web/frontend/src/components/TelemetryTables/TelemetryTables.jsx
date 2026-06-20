@@ -20,8 +20,10 @@ const TelemetryTables = ({ tlsSni = [], ja3 = [], mdns = [] }) => {
   return (
     <section className="section telemetry-tables">
       <h2>🔐 TLS SNI · JA3 · mDNS</h2>
-      <div className="telemetry-grid">
-        <div>
+      
+      {/* --- LINE 1: TLS SNI & JA3 --- */}
+      <div className="telemetry-row">
+        <div className="telemetry-col">
           <h3 className="telemetry-subtitle">TLS SNI ({tlsSni.length})</h3>
           <div className="dns-table-container telemetry-scroll">
             <table className="dns-table">
@@ -44,7 +46,8 @@ const TelemetryTables = ({ tlsSni = [], ja3 = [], mdns = [] }) => {
             </table>
           </div>
         </div>
-        <div>
+
+        <div className="telemetry-col">
           <h3 className="telemetry-subtitle">JA3 ({ja3.length})</h3>
           <div className="dns-table-container telemetry-scroll">
             <table className="dns-table">
@@ -67,7 +70,12 @@ const TelemetryTables = ({ tlsSni = [], ja3 = [], mdns = [] }) => {
             </table>
           </div>
         </div>
-        <div>
+      </div>
+
+      {/* --- LINE 2: mDNS --- */}
+      <div className="telemetry-row">
+        {/* We reuse telemetry-col so it aligns perfectly. You can also add a custom class if you want it to stretch full-width */}
+        <div className="telemetry-col">
           <h3 className="telemetry-subtitle">mDNS ({mdns.length})</h3>
           <div className="dns-table-container telemetry-scroll">
             <table className="dns-table">
@@ -91,6 +99,7 @@ const TelemetryTables = ({ tlsSni = [], ja3 = [], mdns = [] }) => {
           </div>
         </div>
       </div>
+      
     </section>
   );
 };
