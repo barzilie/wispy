@@ -162,9 +162,7 @@ source .venv/bin/activate
 python start_wispy.py        # starts Flask :5000 and React :3001
 ```
 
-Open **http://localhost:3001**, click **Initiate scan**, pick a network, then open the monitoring screen.
-
-> Do **not** use `main.py` with the React UI — it is the legacy CLI launcher only.
+Open **http://localhost:3000**, click **Initiate scan**, pick a network, then open the monitoring screen.
 
 ### 8.2 Kali Linux — rogue AP from the React UI
 
@@ -182,75 +180,9 @@ sudo .venv/bin/python core/sniffer.py
 ```
 
 To stop the rogue AP from the API: `POST /api/stop-ap` (or exit Flask — `atexit` runs cleanup).
-
-### 8.3 Legacy — CLI `main.py` (Kali, all-in-one terminal)
-
-Still supported for headless lab use. Requires root:
-
-```bash
-cd ~/wispy
-sudo .venv/bin/python main.py
-```
-
-Follow prompts: scan → select network → AP + sniffer start in one process tree.
-
-### 8.4 What the sniffer captures
-
-BPF filter (see `core/sniffer.py`):
-
-`udp port 53 or udp port 5353 or udp port 67 or udp port 68 or tcp port 443 or tcp port 80 or tcp port 25`
-
-| Traffic | Stored as |
-|--------|-----------|
-| DNS queries | `dns_requests` (ad/tracking domains filtered) |
-| DNS responses | In-memory IP→hostname cache (`analysis/correlation.py`) for flow labeling |
-| DHCP | `devices` (hostname, Option 55 in `dhcp_params`) |
-| mDNS (`.local` services) | `mdns_broadcasts` |
-| TLS ClientHello on 443 | `tls_sni`, `ja3_fingerprints` |
-| TCP/UDP flows on filtered ports | `flow_sessions` (duration, bytes; `dst_host` from **SNI** or **DNS** cache, `host_source`: `sni` / `dns` / `unknown`) |
-| Cleartext HTTP (80) / SMTP (25) | `plaintext_events` (method/command, host/server, captured plaintext segment in `body`) |
-
-Flow rows are flushed to SQLite every ~5 seconds. Plaintext HTTP/SMTP uses a 60s dedup window.
-
-### 8.5 API and dashboard surfaces
-
-Key endpoints (`web/app.py`):
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /api/data` | Devices (with `patterns` / `flow_stats`), DNS slice, TLS, JA3, mDNS, **flows**, **plaintext** |
-| `GET /api/dns`, `GET /api/flows`, `GET /api/plaintext` | Paginated feeds |
-| `POST /api/start-scan`, `POST /api/select-network`, `POST /api/stop-ap` | UI workflow + real-mode AP |
-| `POST /api/agent/investigate` | Agentic session investigation (Gemini) |
-| `POST /api/agent/recommend`, `POST /api/recommend` | Agentic next-step suggestions (alias) |
-
-React monitoring UI (`http://localhost:3001`): device cards, DNS table/charts, telemetry tables, **Session Reconnaissance (flows)**, **Plaintext leaks**, and **Agentic** panel (investigate vs recommend tabs).
-
-Legacy template UI: `http://localhost:5000` (fewer extension panels).
-
 ---
 
-## Step 9 — Privacy and Data Handling Notes
-
-WiSpy is for **authorized lab use only**.
-
-**Collected (metadata and selective cleartext):**
-
-- DNS names, DHCP hostname/Option 55, mDNS service names
-- TLS **SNI** and **JA3** hashes (from ClientHello only)
-- **Flow sessions**: IPs, ports, timing, packet/byte counts; hostnames when inferred from SNI or recent DNS answers
-- **Plaintext HTTP/SMTP** on ports 80/25 when not TLS-wrapped: request line / commands and a stored **body** field (captured segment only)
-
-**Not collected:**
-
-- Decrypted HTTPS/TLS application data
-- MITM or credential harvesting
-
-Operate only on networks and devices you are permitted to monitor.
-
----
-
-## Step 10 — Troubleshooting
+## Step 9 — Troubleshooting
 
 | Symptom | Fix |
 |---|---|

@@ -1,12 +1,12 @@
-# 🚀 How to Start WiSpy
+# How to Start WiSpy
 
-## TL;DR - Just Run This:
+## Just Run This:
 
 ```bash
 sudo .venv/bin/python start_wispy.py
 ```
 
-Then open: **http://localhost:3001**
+Then open: **http://localhost:3000**
 
 ---
 
@@ -16,13 +16,6 @@ Then open: **http://localhost:3001**
 2. **React Frontend** (UI) → Port 3001
 
 ---
-
-## ⚠️ Important Notes:
-
-- **DO NOT use `main.py`** - That's the old CLI version
-- **Use `start_wispy.py`** - The new launcher
-- You need **both** Flask and React running
-- Requires Kali Linux with a compatible wireless adapter — see `INSTALLATION.md`
 
 ---
 
@@ -48,7 +41,3 @@ sudo .venv/bin/python start_wispy.py
 ```
 
 ---
-
-## That's It!
-
-See `STARTUP_GUIDE.md` for detailed instructions.
